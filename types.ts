@@ -5,6 +5,7 @@ export interface Message {
   content: string;
   timestamp: number;
   groundingUrls?: Array<{ title: string; uri: string }>;
+  searchEntryPointHtml?: string;
   isEdit?: boolean;
   checkpointIndex?: number;
 }

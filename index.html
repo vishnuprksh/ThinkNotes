@@ -56,6 +56,51 @@
         .markdown-body table td { border: 1px solid #30363d; padding: 6px 13px; }
         .markdown-body table tr { background-color: #0d1117; border-top: 1px solid #30363d; }
         .markdown-body table tr:nth-child(2n) { background-color: #161b22; }
+
+        /* NATIVE PRINT STYLES */
+        @media print {
+            body {
+                background: white !important;
+                color: black !important;
+                height: auto !important;
+                overflow: visible !important;
+            }
+            .no-print, header, footer, .chat-panel-container, button, .sidebar-trigger {
+                display: none !important;
+            }
+            main {
+                display: block !important;
+                padding: 0 !important;
+                margin: 0 !important;
+                overflow: visible !important;
+                background: white !important;
+            }
+            .markdown-body {
+                background: white !important;
+                color: black !important;
+                padding: 20px !important;
+            }
+            .markdown-body * {
+                color: black !important;
+                border-color: #eee !important;
+            }
+            .markdown-body h1, .markdown-body h2 {
+                border-bottom: 1px solid #eee !important;
+            }
+            .markdown-body pre {
+                background-color: #f6f8fa !important;
+                border: 1px solid #ddd !important;
+                page-break-inside: avoid;
+            }
+            .markdown-body code {
+                background-color: #f6f8fa !important;
+            }
+            /* Reset specific tailwind dark mode colors if they persist */
+            #root, #main-view {
+                background: white !important;
+                color: black !important;
+            }
+        }
     </style>
 <script type="importmap">
 {

@@ -1,52 +1,44 @@
 
-import { GoogleGenAI, GenerateContentResponse, Type, FunctionDeclaration } from "@google/genai";
+import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 import { Message } from "../types";
 
 const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
-
-const updateDocumentTool: FunctionDeclaration = {
-  name: 'update_document',
-  parameters: {
-    type: Type.OBJECT,
-    description: 'Updates the entire content of the current markdown document.',
-    properties: {
-      new_content: {
-        type: Type.STRING,
-        description: 'The full markdown content to replace the current document with.',
-      },
-      reason: {
-        type: Type.STRING,
-        description: 'A brief description of why the document is being updated.',
-      }
-    },
-    required: ['new_content', 'reason'],
-  },
-};
 
 export const getCopilotResponse = async (
   messages: Message[],
   editorContext: string
 ) => {
   const ai = getAI();
+  // Switching to gemini-3-flash-preview as requested for higher speed and efficiency
   const model = 'gemini-3-flash-preview';
   
-  const systemInstruction = `You are ThinkNotes AI, a world-class reasoning agent specialized for Markdown editing and document transformation. 
-  Your primary goal is to help the user synthesize, refine, and research knowledge for their document.
-
-  Capabilities:
-  1. DIRECT EDITING: Use the 'update_document' tool to apply changes to the current note immediately.
-  2. WEB RESEARCH: Use Google Search to find current facts or sources before writing.
-  3. REASONING: Plan complex tasks step-by-step.
+  const systemInstruction = `You are ThinkNotes AI, an elite research assistant and document editor.
   
-  CONTEXT OF CURRENT NOTE:
+  YOUR CORE MISSION: 
+  Provide factually accurate information by cross-referencing user claims with real-time Google Search data.
+
+  FACT-CHECKING PROTOCOL:
+  1. For factual queries, technical details, or data points, YOU MUST search Google first.
+  2. If search results are contradictory, mention the different perspectives.
+  3. Prioritize primary sources (official documentation, reputable news).
+
+  DOCUMENT UPDATE PROTOCOL:
+  Use the following special syntax to update the user's note. You MUST provide the FULL content of the document inside this block.
+  
+  Syntax:
+  [[UPDATE: Short description of change]]
+  (The entire updated markdown content goes here)
+  [[/UPDATE]]
+
+  BEHAVIOR:
+  - Keep chat responses concise. 
+  - If a user asks to "verify this" or "expand on this", perform the search, verify facts, then apply the [[UPDATE]] to the document.
+  - Do not use any other tools besides googleSearch.
+
+  CURRENT DOCUMENT CONTEXT:
   """
   ${editorContext}
-  """
-  
-  Guidelines:
-  1. If a user asks for a structural change (e.g. "add a section", "summarize this", "fix grammar"), use 'update_document'.
-  2. If search is needed for accuracy, search first, then apply the edit.
-  3. Be brief in your chat responses. Let the document edits speak for themselves.`;
+  """`;
 
   const conversation = messages.map(m => ({
     role: m.role === 'user' ? 'user' : 'model',
@@ -59,14 +51,16 @@ export const getCopilotResponse = async (
       contents: conversation as any,
       config: {
         systemInstruction: systemInstruction,
-        tools: [{ googleSearch: {} }, { functionDeclarations: [updateDocumentTool] }],
-        thinkingConfig: { thinkingBudget: 4000 }
+        tools: [{ googleSearch: {} }],
+        // Adjusted thinking budget for the flash model to ensure snappy responses
+        thinkingConfig: { thinkingBudget: 16000 }
       },
     });
 
-    const text = response.text || "";
-    const functionCalls = response.functionCalls;
-    const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+    const fullText = response.text || "";
+    const groundingMetadata = response.candidates?.[0]?.groundingMetadata;
+    const groundingChunks = groundingMetadata?.groundingChunks || [];
+    const searchEntryPointHtml = groundingMetadata?.searchEntryPoint?.htmlContent;
     
     const urls = groundingChunks
       .filter(chunk => chunk.web)
@@ -76,9 +70,9 @@ export const getCopilotResponse = async (
       }));
 
     return {
-      text,
+      text: fullText,
       urls,
-      functionCalls
+      searchEntryPointHtml
     };
   } catch (error) {
     console.error("ThinkNotes API Error:", error);

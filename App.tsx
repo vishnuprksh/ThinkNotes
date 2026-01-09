@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { marked } from 'marked';
 import ChatPanel from './components/ChatPanel';
 import { Message, Checkpoint } from './types';
@@ -54,6 +54,10 @@ const App: React.FC = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isPreviewMode, setIsPreviewMode] = useState(true);
   const [showDiff, setShowDiff] = useState(false);
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(380);
+  const [isResizing, setIsResizing] = useState(false);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
   
   const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([{
     content: INITIAL_CONTENT,
@@ -66,8 +70,37 @@ const App: React.FC = () => {
     return checkpoints[checkpoints.length - 2].content;
   }, [checkpoints]);
 
+  // Sidebar Resize Logic
+  const startResizing = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+  }, []);
+
+  const stopResizing = useCallback(() => {
+    setIsResizing(false);
+  }, []);
+
+  const resize = useCallback((e: MouseEvent) => {
+    if (isResizing) {
+      const newWidth = window.innerWidth - e.clientX;
+      if (newWidth > 260 && newWidth < 800) {
+        setSidebarWidth(newWidth);
+      }
+    }
+  }, [isResizing]);
+
+  useEffect(() => {
+    window.addEventListener('mousemove', resize);
+    window.addEventListener('mouseup', stopResizing);
+    return () => {
+      window.removeEventListener('mousemove', resize);
+      window.removeEventListener('mouseup', stopResizing);
+    };
+  }, [resize, stopResizing]);
+
   useEffect(() => {
     const saved = localStorage.getItem('thinknotes_content_v1');
+    const savedWidth = localStorage.getItem('thinknotes_sidebar_width');
     if (saved) {
       setContent(saved);
       setCheckpoints([{
@@ -76,11 +109,26 @@ const App: React.FC = () => {
         description: "Restored Note"
       }]);
     }
+    if (savedWidth) {
+      setSidebarWidth(parseInt(savedWidth, 10));
+    }
+
+    const handleClickOutside = (event: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(event.target as Node)) {
+        setIsExportMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   useEffect(() => {
     localStorage.setItem('thinknotes_content_v1', content);
   }, [content]);
+
+  useEffect(() => {
+    localStorage.setItem('thinknotes_sidebar_width', sidebarWidth.toString());
+  }, [sidebarWidth]);
 
   const handleUpdateDocument = useCallback((newContent: string, reason: string) => {
     setCheckpoints(prev => [...prev, {
@@ -119,16 +167,70 @@ const App: React.FC = () => {
     }
   }, [content]);
 
+  // --- Export Logic ---
+  const exportAsMD = () => {
+    const blob = new Blob([content], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `thinknote-${Date.now()}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setIsExportMenuOpen(false);
+  };
+
+  const exportAsPDF = () => {
+    setIsExportMenuOpen(false);
+    const originalPreviewMode = isPreviewMode;
+    const originalDiffMode = showDiff;
+    
+    setIsPreviewMode(true);
+    setShowDiff(false);
+
+    setTimeout(() => {
+      window.print();
+      setIsPreviewMode(originalPreviewMode);
+      setShowDiff(originalDiffMode);
+    }, 100);
+  };
+
+  const exportAsDOC = () => {
+    const header = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Export DOC</title></head><body>";
+    const footer = "</body></html>";
+    const sourceHTML = header + renderedMarkdown + footer;
+    
+    const blob = new Blob(['\ufeff', sourceHTML], {
+      type: 'application/msword'
+    });
+    
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `thinknote-${Date.now()}.doc`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setIsExportMenuOpen(false);
+  };
+
   return (
-    <div className="flex h-screen w-full bg-[#0d1117] text-[#c9d1d9] overflow-hidden">
-      <div className={`flex flex-col flex-1 min-w-0 transition-all duration-300`}>
-        <header className="h-14 border-b border-[#30363d] flex items-center justify-between px-4 bg-[#161b22] z-10 shadow-sm">
+    <div className={`flex h-screen w-full bg-[#0d1117] text-[#c9d1d9] overflow-hidden ${isResizing ? 'cursor-col-resize select-none' : ''}`}>
+      <div id="main-view" className={`flex flex-col flex-1 min-w-0 transition-all duration-300`}>
+        <header className="no-print h-14 border-b border-[#30363d] flex items-center justify-between px-4 bg-[#161b22] z-10 shadow-sm">
           <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
-              <div className="w-6 h-6 bg-indigo-600 rounded flex items-center justify-center">
-                <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" /></svg>
+            <div className="flex items-center gap-2.5">
+              <div className="relative group cursor-pointer">
+                <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500 to-purple-600 rounded-lg blur opacity-25 group-hover:opacity-50 transition duration-1000 group-hover:duration-200"></div>
+                <div className="relative w-8 h-8 bg-[#0d1117] border border-[#30363d] rounded-lg flex items-center justify-center shadow-lg group-hover:border-indigo-500/50 transition-colors">
+                  <svg className="w-5 h-5 text-indigo-400 group-hover:text-indigo-300 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M11 4a2 2 0 114 0v1a2 2 0 11-4 0V4z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M18 19a2 2 0 10-4 0v1a2 2 0 104 0v-1z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10 19a2 2 0 11-4 0v1a2 2 0 114 0v-1z" />
+                    <circle cx="12" cy="12" r="3" strokeWidth={2} />
+                    <path d="M12 9V5M12 19v-4M9 12H5m14 0h-4" strokeWidth={1.5} strokeLinecap="round" />
+                  </svg>
+                </div>
               </div>
-              <span className="font-bold text-sm tracking-tight hidden sm:inline-block">ThinkNotes</span>
+              <span className="font-bold text-base tracking-tight hidden sm:inline-block bg-clip-text text-transparent bg-gradient-to-r from-white to-[#8b949e]">ThinkNotes</span>
             </div>
             <div className="h-4 w-[1px] bg-[#30363d]"></div>
             <div className="flex gap-1 bg-[#0d1117] p-0.5 rounded-md border border-[#30363d]">
@@ -156,6 +258,30 @@ const App: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-3">
+            <div className="relative" ref={exportMenuRef}>
+              <button
+                onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-[#c9d1d9] hover:bg-[#21262d] border border-[#30363d] transition-all"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                Export
+              </button>
+              {isExportMenuOpen && (
+                <div className="absolute right-0 mt-2 w-48 bg-[#161b22] border border-[#30363d] rounded-lg shadow-xl z-50 overflow-hidden py-1">
+                  <button onClick={exportAsMD} className="w-full text-left px-4 py-2 text-xs hover:bg-[#21262d] transition-colors flex items-center gap-2">
+                    <span className="w-4 text-center font-bold text-indigo-400">MD</span> Markdown (.md)
+                  </button>
+                  <button onClick={exportAsPDF} className="w-full text-left px-4 py-2 text-xs hover:bg-[#21262d] transition-colors flex items-center gap-2">
+                    <span className="w-4 text-center font-bold text-red-400">PDF</span> PDF Document (.pdf)
+                  </button>
+                  <button onClick={exportAsDOC} className="w-full text-left px-4 py-2 text-xs hover:bg-[#21262d] transition-colors flex items-center gap-2">
+                    <span className="w-4 text-center font-bold text-blue-400">DOC</span> Word Document (.doc)
+                  </button>
+                </div>
+              )}
+            </div>
             {checkpoints.length > 1 && (
               <button
                 onClick={handleUndo}
@@ -182,7 +308,7 @@ const App: React.FC = () => {
         <main className="flex-1 relative overflow-hidden flex bg-[#0d1117]">
           {showDiff ? (
             <div className="flex-1 overflow-y-auto p-4 sm:p-6 font-mono text-[13px] leading-relaxed bg-[#0d1117]">
-              <div className="max-w-5xl mx-auto border border-[#30363d] rounded-lg overflow-hidden shadow-2xl">
+              <div className="max-w-6xl mx-auto border border-[#30363d] rounded-lg overflow-hidden shadow-2xl">
                 <div className="bg-[#161b22] px-4 py-2 border-b border-[#30363d] text-[10px] text-[#8b949e] uppercase font-bold tracking-widest flex justify-between items-center">
                   <span>Changes Comparison</span>
                   <button onClick={() => setShowDiff(false)} className="hover:text-white">Close</button>
@@ -200,30 +326,45 @@ const App: React.FC = () => {
               </div>
             </div>
           ) : !isPreviewMode ? (
-            <textarea
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              className="flex-1 w-full bg-transparent p-6 sm:p-10 font-mono text-[14px] leading-relaxed focus:outline-none resize-none text-[#d1d5db] caret-indigo-500"
-              spellCheck={false}
-              placeholder="Start writing..."
-            />
+            <div className="flex-1 overflow-y-auto bg-[#0d1117] flex justify-center">
+              <textarea
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                className="w-full max-w-6xl bg-transparent p-6 sm:p-10 font-mono text-[14px] leading-relaxed focus:outline-none resize-none text-[#d1d5db] caret-indigo-500 min-h-full"
+                spellCheck={false}
+                placeholder="Start writing..."
+              />
+            </div>
           ) : (
             <div className="flex-1 overflow-y-auto p-6 sm:p-10 bg-[#0d1117]">
-               <div className="max-w-3xl mx-auto markdown-body" dangerouslySetInnerHTML={{ __html: renderedMarkdown as string }} />
+               <div id="markdown-container" className="max-w-6xl mx-auto markdown-body" dangerouslySetInnerHTML={{ __html: renderedMarkdown as string }} />
             </div>
           )}
         </main>
       </div>
 
       {isSidebarOpen && (
-        <ChatPanel 
-          editorContent={content} 
-          messages={messages} 
-          setMessages={setMessages} 
-          onUpdateDocument={handleUpdateDocument}
-          onUndo={handleUndo}
-          canUndo={checkpoints.length > 1}
-        />
+        <>
+          <div 
+            onMouseDown={startResizing}
+            className={`no-print w-1 bg-[#30363d] hover:bg-indigo-500/50 cursor-col-resize transition-colors z-20 relative group ${isResizing ? 'bg-indigo-500' : ''}`}
+          >
+            <div className="absolute inset-y-0 -left-2 -right-2 z-10"></div>
+          </div>
+          <div 
+            className="chat-panel-container h-full no-print bg-[#0d1117]" 
+            style={{ width: `${sidebarWidth}px` }}
+          >
+            <ChatPanel 
+              editorContent={content} 
+              messages={messages} 
+              setMessages={setMessages} 
+              onUpdateDocument={handleUpdateDocument}
+              onUndo={handleUndo}
+              canUndo={checkpoints.length > 1}
+            />
+          </div>
+        </>
       )}
     </div>
   );
