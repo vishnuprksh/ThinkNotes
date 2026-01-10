@@ -1,13 +1,14 @@
 import { onRequest } from "firebase-functions/v2/https";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 import * as logger from "firebase-functions/logger";
 
 const API_KEY = process.env.GEMINI_API_KEY || "";
-const genAI = new GoogleGenerativeAI(API_KEY);
+const ai = new GoogleGenAI({ apiKey: API_KEY });
 
 export const getCopilotResponse = onRequest({
   cors: true,
-  secrets: ["GEMINI_API_KEY"]
+  secrets: ["GEMINI_API_KEY"],
+  timeoutSeconds: 300
 }, async (req: any, res: any) => {
   if (req.method !== "POST") {
     res.status(405).send("Method Not Allowed");
@@ -23,14 +24,11 @@ export const getCopilotResponse = onRequest({
     currentReaderScript
   } = req.body;
 
-  const modelName = 'gemini-2.5-flash-preview-09-2025'; // User requested specific preview model
+  const modelName = 'gemini-2.5-flash-preview-09-2025';
 
-  // Filter messages to be valid for Gemini (User/Model only, no System)
   const validMessages = messages.filter((m: any) => m.role !== 'system');
 
-  // Split into history (0 to n-1) and current message (n)
-  // This prevents the "last message duplicated" error if we passed all to history
-  const history = validMessages.slice(0, -1).map((m: any) => ({
+  const contents = validMessages.map((m: any) => ({
     role: m.role === 'user' ? 'user' : 'model',
     parts: [{ text: m.content }]
   }));
@@ -38,23 +36,8 @@ export const getCopilotResponse = onRequest({
   const lastMessage = validMessages[validMessages.length - 1];
   const prompt = lastMessage ? lastMessage.content : "";
 
-  // Heuristic: Check if user wants to search
   const searchKeywords = ["search", "find", "look up", "latest", "news", "current", "who is", "what is"];
   const isSearchIntent = searchKeywords.some(kw => prompt.toLowerCase().includes(kw));
-
-  // Dynamic Configuration
-  let tools: any = undefined;
-  let generationConfig: any = undefined;
-
-  if (isSearchIntent) {
-    // Enable Grounding
-    tools = [{ googleSearch: {} }];
-  } else {
-    // Enable Structured Output preference (via system prompt mostly, but we can set mimeType if fully JSON is desired)
-    // For this agent, we want mixed markdown/JSON, so strict JSON schema might be too restrictive for the "Thoughts" part.
-    // We will stick to System Prompt for structure, but ensure NO tools are active to allow Full Reasoning.
-    tools = [];
-  }
 
   const systemInstruction = `You are thinkNotes Assistant, a powerful workspace companion. 
   You follow a strict AGENTIC WORKFLOW for document transformation and data management.
@@ -106,24 +89,36 @@ export const getCopilotResponse = onRequest({
   CURRENT DOCUMENT:
   """${editorContent}"""`;
 
-  try {
-    const model = genAI.getGenerativeModel({
-      model: modelName,
+  let config: any;
+
+  if (isSearchIntent) {
+    config = {
+      tools: [{ googleSearch: {} }],
       systemInstruction: systemInstruction,
-      tools: tools
-    });
+      temperature: 0,
+    };
+  } else {
+    config = {
+      thinkingConfig: {
+        includeThoughts: true,
+      },
+      systemInstruction: systemInstruction,
+      temperature: 0,
+      responseMimeType: "text/plain",
+    };
+  }
 
-    const chat = model.startChat({
-      history: history,
-      generationConfig: generationConfig
+  try {
+    const stream = await ai.models.generateContentStream({
+      model: modelName,
+      contents: contents,
+      config: config,
     });
-
-    const result = await chat.sendMessageStream(prompt);
 
     res.setHeader("Content-Type", "text/plain");
 
-    for await (const chunk of result.stream) {
-      const chunkText = chunk.text();
+    for await (const chunk of stream) {
+      const chunkText = chunk.text;
       if (chunkText) {
         res.write(chunkText);
       }
