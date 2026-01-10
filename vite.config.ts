@@ -13,6 +13,11 @@ export default defineConfig(({ mode }) => {
           target: 'https://getcopilotresponse-c4w26t43sa-uc.a.run.app',
           changeOrigin: true,
           rewrite: (path) => '',
+        },
+        '/fpl': {
+          target: 'https://fantasy.premierleague.com/api',
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/fpl/, ''),
         }
       },
     },

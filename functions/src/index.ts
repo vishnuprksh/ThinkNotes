@@ -23,7 +23,38 @@ export const getCopilotResponse = onRequest({
     currentReaderScript
   } = req.body;
 
-  const modelName = 'gemini-3-flash-preview';
+  const modelName = 'gemini-2.5-flash-preview-09-2025'; // User requested specific preview model
+
+  // Filter messages to be valid for Gemini (User/Model only, no System)
+  const validMessages = messages.filter((m: any) => m.role !== 'system');
+
+  // Split into history (0 to n-1) and current message (n)
+  // This prevents the "last message duplicated" error if we passed all to history
+  const history = validMessages.slice(0, -1).map((m: any) => ({
+    role: m.role === 'user' ? 'user' : 'model',
+    parts: [{ text: m.content }]
+  }));
+
+  const lastMessage = validMessages[validMessages.length - 1];
+  const prompt = lastMessage ? lastMessage.content : "";
+
+  // Heuristic: Check if user wants to search
+  const searchKeywords = ["search", "find", "look up", "latest", "news", "current", "who is", "what is"];
+  const isSearchIntent = searchKeywords.some(kw => prompt.toLowerCase().includes(kw));
+
+  // Dynamic Configuration
+  let tools: any = undefined;
+  let generationConfig: any = undefined;
+
+  if (isSearchIntent) {
+    // Enable Grounding
+    tools = [{ googleSearch: {} }];
+  } else {
+    // Enable Structured Output preference (via system prompt mostly, but we can set mimeType if fully JSON is desired)
+    // For this agent, we want mixed markdown/JSON, so strict JSON schema might be too restrictive for the "Thoughts" part.
+    // We will stick to System Prompt for structure, but ensure NO tools are active to allow Full Reasoning.
+    tools = [];
+  }
 
   const systemInstruction = `You are thinkNotes Assistant, a powerful workspace companion. 
   You follow a strict AGENTIC WORKFLOW for document transformation and data management.
@@ -75,22 +106,19 @@ export const getCopilotResponse = onRequest({
   CURRENT DOCUMENT:
   """${editorContent}"""`;
 
-  const conversation = messages.map((m: any) => ({
-    role: m.role === 'user' ? 'user' : 'model',
-    parts: [{ text: m.content }]
-  }));
-
   try {
     const model = genAI.getGenerativeModel({
       model: modelName,
       systemInstruction: systemInstruction,
+      tools: tools
     });
 
     const chat = model.startChat({
-      history: conversation,
+      history: history,
+      generationConfig: generationConfig
     });
 
-    const result = await chat.sendMessageStream(messages[messages.length - 1].content);
+    const result = await chat.sendMessageStream(prompt);
 
     res.setHeader("Content-Type", "text/plain");
 

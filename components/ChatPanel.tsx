@@ -73,7 +73,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
 
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
-    const userMsg: Message = { id: Date.now().toString(), role: 'user', content: input, timestamp: Date.now() };
+    const userMsg: Message = { id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, role: 'user', content: input, timestamp: Date.now() };
     setMessages(prev => [...prev, userMsg]);
     setInput('');
     setIsLoading(true);
@@ -113,19 +113,19 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
       const writerPattern = /\[\[UPDATE_WRITER\]\]([\s\S]*?)\[\[\/UPDATE_WRITER\]\]/gi;
       const writerMatch = writerPattern.exec(fullText);
       if (writerMatch) {
-        pendingWriter = writerMatch[1].trim();
+        pendingWriter = writerMatch[1].trim().replace(/^```(javascript|js)?\s*/, '').replace(/```\s*$/, '');
         setWriterScript(pendingWriter);
         pipelineUpdated = true;
-        setMessages(prev => [...prev, { id: Date.now().toString(), role: 'system', content: `⚙️ Assistant: Hydrating Data...`, timestamp: Date.now() }]);
+        setMessages(prev => [...prev, { id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, role: 'system', content: `⚙️ Assistant: Hydrating Data...`, timestamp: Date.now() }]);
       }
 
       const readerPattern = /\[\[UPDATE_READER\]\]([\s\S]*?)\[\[\/UPDATE_READER\]\]/gi;
       const readerMatch = readerPattern.exec(fullText);
       if (readerMatch) {
-        pendingReader = readerMatch[1].trim();
+        pendingReader = readerMatch[1].trim().replace(/^```(javascript|js)?\s*/, '').replace(/```\s*$/, '');
         setReaderScript(pendingReader);
         pipelineUpdated = true;
-        setMessages(prev => [...prev, { id: Date.now().toString(), role: 'system', content: `🔍 Assistant: Mapping Variables...`, timestamp: Date.now() }]);
+        setMessages(prev => [...prev, { id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, role: 'system', content: `🔍 Assistant: Mapping Variables...`, timestamp: Date.now() }]);
       }
 
       let finalVariables = variables;
@@ -164,7 +164,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
       });
 
       const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
+        id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         role: 'assistant',
         content: cleanedChat || "Assistant task completed.",
         thought: fullThought,
@@ -177,7 +177,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
       setMessages(prev => [...prev, assistantMessage]);
     } catch (error) {
       console.error(error);
-      setMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: "Assistant encountered an internal error.", timestamp: Date.now() }]);
+      setMessages(prev => [...prev, { id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, role: 'assistant', content: "Assistant encountered an internal error.", timestamp: Date.now() }]);
     } finally {
       setIsLoading(false);
       setStreamingThought('');

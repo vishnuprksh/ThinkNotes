@@ -27,7 +27,8 @@ export const getCopilotResponseStream = async (
     });
 
     if (!response.ok) {
-      throw new Error(`API call failed: ${response.statusText}`);
+      const errorText = await response.text();
+      throw new Error(`API call failed: ${response.status} ${response.statusText} - ${errorText}`);
     }
 
     if (!response.body) {

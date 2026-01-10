@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { marked } from 'marked';
 import ChatPanel from './components/ChatPanel';
 import { Message, GlobalState, ViewMode, DatabaseState, TableInfo, Template, TableData } from './types';
-import initSqlJs from "https://esm.sh/sql.js@1.10.3";
+import initSqlJs from "sql.js";
 
 marked.setOptions({
   gfm: true,
@@ -102,17 +102,19 @@ const App: React.FC = () => {
   }, []);
 
   // Initialize DB on mount
+  // Initialize DB on mount
   useEffect(() => {
     const initDatabase = async () => {
       try {
-        const wasmRes = await fetch("https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/sql-wasm.wasm");
-        const wasmBinary = await wasmRes.arrayBuffer();
-        const SQL = await initSqlJs({ wasmBinary: new Uint8Array(wasmBinary) });
+        const SQL = await initSqlJs({
+          locateFile: file => `/sql-wasm.wasm`
+        });
         const newDb = new SQL.Database();
         setDb(newDb);
         refreshDbState(newDb);
       } catch (err: any) {
         setDbState(prev => ({ ...prev, error: `DB Error: ${err.message}` }));
+        console.error("DB Init Error:", err);
       }
     };
     initDatabase();
@@ -180,23 +182,37 @@ const App: React.FC = () => {
 
     try {
       if (overridingScripts?.writer) {
+        console.log("Evaluating Writer Override:", overridingScripts.writer.substring(0, 50) + "...");
+        if (!overridingScripts.writer.trim()) throw new Error("Writer script is empty");
         const writerRunner = (0, eval)(`(${overridingScripts.writer})`);
-        await writerRunner({ db, fetchExternalData });
-      } else {
+        if (typeof writerRunner === 'function') {
+          await writerRunner({ db, fetchExternalData });
+        } else {
+          console.warn("Writer script did not evaluate to a function:", writerRunner);
+        }
+      } else if (writerScript && writerScript.trim()) {
+        console.log("Evaluating Writer Default:", writerScript.substring(0, 50) + "...");
         const writerRunner = (0, eval)(`(${writerScript})`);
-        await writerRunner({ db, fetchExternalData });
+        if (typeof writerRunner === 'function') {
+          await writerRunner({ db, fetchExternalData });
+        }
       }
 
       const readerToRun = overridingScripts?.reader || readerScript;
-      const readerRunner = (0, eval)(`(${readerToRun})`);
-      const newVars = await readerRunner({ db });
-
-      if (newVars && typeof newVars === 'object') {
-        setVariables(newVars);
+      if (readerToRun && readerToRun.trim()) {
+        const readerRunner = (0, eval)(`(${readerToRun})`);
+        if (typeof readerRunner === 'function') {
+          const newVars = await readerRunner({ db });
+          if (newVars && typeof newVars === 'object') {
+            setVariables(newVars);
+          }
+        } else {
+          console.warn("Reader script did not evaluate to a function:", readerRunner);
+        }
       }
 
       refreshDbState(db);
-      return newVars || {};
+      return variables; // Return current variables if no update
     } catch (e: any) {
       console.error("Pipeline Error:", e);
       setDbState(prev => ({ ...prev, error: `Pipeline Error: ${e.message}` }));
@@ -224,7 +240,7 @@ const App: React.FC = () => {
         return m.timestamp <= checkpoint.timestamp;
       });
       return [...filtered, {
-        id: Date.now().toString(),
+        id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         role: 'system',
         content: `⏪ System: Restored workspace to: "${checkpoint.description}"`,
         timestamp: Date.now()
@@ -294,12 +310,18 @@ const App: React.FC = () => {
     try {
       if (templateId === 'fpl_analysis') {
         const fWriter = `async ({ db, fetchExternalData }) => {
-  const proxy = 'https://api.codetabs.com/v1/proxy/?quest=';
-  const bootstrapRes = await fetchExternalData(proxy + encodeURIComponent('https://fantasy.premierleague.com/api/bootstrap-static/'));
-  const fixturesRes = await fetchExternalData(proxy + encodeURIComponent('https://fantasy.premierleague.com/api/fixtures/'));
+  // Using local Vite proxy configured in vite.config.ts
+  const bootstrapRes = await fetchExternalData('/fpl/bootstrap-static/');
+  const fixturesRes = await fetchExternalData('/fpl/fixtures/');
   
   if (!bootstrapRes.data || !fixturesRes.data) {
-    throw new Error("FPL API Failed: " + (bootstrapRes.error || fixturesRes.error || "Invalid Response"));
+    const msg = bootstrapRes.error || fixturesRes.error || "Check network connection.";
+    throw new Error("FPL API Failed: " + msg);
+  }
+
+  // Robust check for data validity - failures often return HTML or empty objects
+  if (!bootstrapRes.data.teams || !Array.isArray(bootstrapRes.data.teams)) {
+    throw new Error("FPL API returned invalid data (likely CORS or Rate Limit). Response: " + JSON.stringify(bootstrapRes.data).substring(0, 100));
   }
 
   const { teams, elements, events } = bootstrapRes.data;
@@ -386,23 +408,23 @@ const App: React.FC = () => {
   };
 }`;
         await handleSync({ writer: fWriter, reader: fReader });
-        const newContent = `# 🏆 FPL Expert Analysis (GW {{current_gw}})
+        const newContent = `# FPL Expert Analysis (GW {{current_gw}})
 
-## 🌟 Recommended Best 11
+## Recommended Best 11
 Selected based on current **Form** (60%) and **PPG** (40%).
 
 {{best_11_table}}
 
 ---
 
-## 🔥 In-Form Players
+## In-Form Players
 Highest performing players across all teams.
 
 {{top_players_table}}
 
 ---
 
-## 📅 Softest Fixtures (Next 3 GWs)
+## Softest Fixtures (Next 3 GWs)
 Teams with the lowest average Fixture Difficulty Rating (FDR).
 
 {{fixture_difficulty}}`;
@@ -441,7 +463,7 @@ Teams with the lowest average Fixture Difficulty Rating (FDR).
         recordGlobalState('Applied Student Template', { content: newContent, writerScript: sWriter, readerScript: sReader });
       }
     } catch (e: any) {
-      setMessages(prev => [...prev, { id: Date.now().toString(), role: 'system', content: '❌ Template Error: ' + e.message, timestamp: Date.now() }]);
+      setMessages(prev => [...prev, { id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, role: 'system', content: '❌ Template Error: ' + e.message, timestamp: Date.now() }]);
     } finally {
       setIsTemplateLoading(false);
     }
@@ -561,7 +583,7 @@ Teams with the lowest average Fixture Difficulty Rating (FDR).
           try {
             await handleSync({ writer: json.writerScript, reader: json.readerScript });
           } catch (syncErr: any) {
-            setMessages(prev => [...prev, { id: Date.now().toString(), role: 'system', content: '❌ Import Sync Error: ' + syncErr.message, timestamp: Date.now() }]);
+            setMessages(prev => [...prev, { id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, role: 'system', content: '❌ Import Sync Error: ' + syncErr.message, timestamp: Date.now() }]);
           } finally {
             setIsTemplateLoading(false);
           }
@@ -640,6 +662,21 @@ Teams with the lowest average Fixture Difficulty Rating (FDR).
           </div>
 
           <div className="flex items-center gap-1 sm:gap-3 ml-2">
+            <button
+              onClick={() => handleSync()}
+              disabled={dbState.isSyncing}
+              title="Sync Data"
+              className={`p-1.5 sm:p-2 rounded-lg border transition-all ${dbState.isSyncing ? 'opacity-50 cursor-not-allowed' : 'hover:bg-white/5'}`}
+              style={{
+                borderColor: 'var(--border-primary)',
+                backgroundColor: 'var(--bg-primary)',
+                color: dbState.isSyncing ? 'var(--accent-primary)' : 'var(--text-secondary)'
+              }}
+            >
+              <svg className={`w-4 h-4 ${dbState.isSyncing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </button>
             <button
               onClick={() => setIsAdvancedMode(!isAdvancedMode)}
               title={isAdvancedMode ? "Disable Advanced Mode" : "Enable Advanced Mode"}

@@ -1,0 +1,273 @@
+@import "tailwindcss";
+
+:root {
+    --bg-primary: #0d1117;
+    --bg-secondary: #161b22;
+    --border-primary: #30363d;
+    --accent-primary: #6366f1;
+    --text-primary: #c9d1d9;
+    --text-secondary: #8b949e;
+    --text-headers: #f0f6fc;
+}
+
+body {
+    font-family: 'Inter', sans-serif;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Themed overrides for Tailwind utilities where possible */
+.bg-theme-main {
+    background-color: var(--bg-primary);
+}
+
+.bg-theme-side {
+    background-color: var(--bg-secondary);
+}
+
+.border-theme {
+    border-color: var(--border-primary);
+}
+
+.text-theme-main {
+    color: var(--text-primary);
+}
+
+.text-theme-muted {
+    color: var(--text-secondary);
+}
+
+.text-theme-accent {
+    color: var(--accent-primary);
+}
+
+.font-mono {
+    font-family: 'Fira Code', monospace;
+}
+
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--bg-primary);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--border-primary);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--text-secondary);
+}
+
+/* Utility to hide scrollbars for cleaner nav */
+.hide-scrollbar::-webkit-scrollbar {
+    display: none;
+}
+
+.hide-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+}
+
+/* Transition for all themed elements */
+* {
+    transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease, box-shadow 0.3s ease;
+}
+
+/* Markdown Preview Styles */
+.markdown-body {
+    line-height: 1.6;
+    color: var(--text-primary);
+}
+
+.markdown-body h1 {
+    @apply text-2xl sm:text-3xl font-bold border-b pb-1 mb-4 mt-6;
+    border-color: var(--border-primary);
+    color: var(--text-headers);
+}
+
+.markdown-body h2 {
+    @apply text-xl sm:text-2xl font-semibold border-b pb-1 mb-4 mt-6;
+    border-color: var(--border-primary);
+    color: var(--text-headers);
+}
+
+.markdown-body h3 {
+    @apply text-lg sm:text-xl font-semibold mb-4 mt-6;
+    color: var(--text-headers);
+}
+
+.markdown-body p {
+    margin-bottom: 16px;
+}
+
+.markdown-body strong {
+    font-weight: 600;
+    color: var(--text-headers);
+}
+
+.markdown-body em {
+    font-style: italic;
+}
+
+.markdown-body code {
+    padding: 0.2em 0.4em;
+    margin: 0;
+    font-size: 85%;
+    background-color: rgba(110, 118, 129, 0.2);
+    border-radius: 6px;
+    font-family: 'Fira Code', monospace;
+    color: var(--accent-primary);
+}
+
+.markdown-body pre {
+    padding: 16px;
+    overflow: auto;
+    font-size: 85%;
+    line-height: 1.45;
+    background-color: var(--bg-secondary);
+    border-radius: 6px;
+    margin-bottom: 16px;
+    border: 1px solid var(--border-primary);
+}
+
+.markdown-body pre code {
+    background-color: transparent;
+    padding: 0;
+    font-size: 100%;
+    color: var(--text-primary);
+}
+
+.markdown-body ul {
+    list-style-type: disc;
+    padding-left: 2em;
+    margin-bottom: 16px;
+}
+
+.markdown-body ol {
+    list-style-type: decimal;
+    padding-left: 2em;
+    margin-bottom: 16px;
+}
+
+.markdown-body blockquote {
+    padding: 0 1em;
+    color: var(--text-secondary);
+    border-left: 0.25em solid var(--accent-primary);
+    margin-bottom: 16px;
+}
+
+/* Table Styles */
+.markdown-body table {
+    border-spacing: 0;
+    border-collapse: collapse;
+    margin-bottom: 16px;
+    width: 100%;
+    display: block;
+    overflow: auto;
+}
+
+.markdown-body table th {
+    font-weight: 600;
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-primary);
+    padding: 6px 13px;
+    color: var(--text-headers);
+}
+
+.markdown-body table td {
+    border: 1px solid var(--border-primary);
+    padding: 6px 13px;
+}
+
+.markdown-body table tr {
+    background-color: var(--bg-primary);
+    border-top: 1px solid var(--border-primary);
+}
+
+.markdown-body table tr:nth-child(2n) {
+    background-color: var(--bg-secondary);
+}
+
+/* NATIVE PRINT STYLES - FIXING THE "STUCK" ISSUE */
+@media print {
+    @page {
+        margin: 20mm;
+    }
+
+    html,
+    body {
+        background: white !important;
+        color: black !important;
+        height: auto !important;
+        overflow: visible !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+
+    #root {
+        height: auto !important;
+        overflow: visible !important;
+    }
+
+    .no-print,
+    header,
+    footer,
+    .chat-panel-container,
+    button,
+    .sidebar-trigger,
+    [role="button"] {
+        display: none !important;
+    }
+
+    #main-view {
+        display: block !important;
+        height: auto !important;
+        overflow: visible !important;
+        background: white !important;
+        width: 100% !important;
+    }
+
+    main {
+        display: block !important;
+        height: auto !important;
+        overflow: visible !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        background: white !important;
+    }
+
+    .markdown-body {
+        background: white !important;
+        color: black !important;
+        padding: 0 !important;
+        width: 100% !important;
+    }
+
+    .markdown-body * {
+        color: black !important;
+        border-color: #ddd !important;
+    }
+
+    .markdown-body h1,
+    .markdown-body h2 {
+        border-bottom: 1px solid #eee !important;
+    }
+
+    .markdown-body pre {
+        background-color: #f6f8fa !important;
+        border: 1px solid #ddd !important;
+        page-break-inside: avoid;
+        white-space: pre-wrap !important;
+        word-wrap: break-word !important;
+    }
+
+    .markdown-body code {
+        background-color: #f6f8fa !important;
+    }
+}
