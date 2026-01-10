@@ -1,6 +1,6 @@
 {
   "name": "thinkNotes",
-  "description": "An AI-native markdown workspace featuring deep reasoning, real-time web research, and intelligent document transformation.",
+  "description": "An AI-native markdown workspace featuring a powerful assistant for reasoning, real-time research, and intelligent document transformation.",
   "requestFramePermissions": [
     "camera",
     "microphone"

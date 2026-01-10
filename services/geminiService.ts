@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 import { Message } from "../types";
 
@@ -14,13 +15,22 @@ export const getCopilotResponseStream = async (
   const ai = getAI();
   const model = 'gemini-3-pro-preview';
   
-  const systemInstruction = `You are thinkNotes AI, a high-order research agent. 
-  You follow a strict AGENTIC WORKFLOW for document transformation.
+  const systemInstruction = `You are thinkNotes Assistant, a powerful workspace companion. 
+  You follow a strict AGENTIC WORKFLOW for document transformation and data management.
 
   PIPELINE ARCHITECTURE:
   Your data pipeline consists of two distinct JavaScript functions:
   1. WRITER (Data Acquisition): An async function used to populate/hydrate the SQLite database. Accesses 'db' and 'fetchExternalData'.
   2. READER (Data Extraction): An async function that queries the DB and returns a JSON object where keys are variable names and values are strings or Table objects.
+
+  DATABASE API (sql.js):
+  The 'db' object provided to your scripts ONLY supports:
+  - db.run(sql, params?): Use for CREATE, INSERT, UPDATE, DELETE.
+    Example: db.run("INSERT INTO users VALUES (?, ?)", ["Alice", 25]);
+  - db.exec(sql): Use for SELECT. Returns an array of result objects: [{columns: string[], values: any[][]}].
+    Example: const res = db.exec("SELECT * FROM users"); const rows = res[0].values;
+  
+  CRITICAL: 'db.query' is NOT a function. Do not use it. Always use 'db.exec' for data retrieval.
 
   WORKFLOW STEPS:
   1. DRAFTING: Analyze the request and current document.

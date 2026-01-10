@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -52,6 +53,15 @@
             background: var(--text-secondary);
         }
 
+        /* Utility to hide scrollbars for cleaner nav */
+        .hide-scrollbar::-webkit-scrollbar {
+          display: none;
+        }
+        .hide-scrollbar {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
+        }
+
         /* Transition for all themed elements */
         * {
             transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease, box-shadow 0.3s ease;
@@ -62,9 +72,16 @@
             line-height: 1.6;
             color: var(--text-primary);
         }
-        .markdown-body h1 { font-size: 2em; font-weight: 700; border-bottom: 1px solid var(--border-primary); padding-bottom: 0.3em; margin-bottom: 16px; margin-top: 24px; color: var(--text-headers); }
-        .markdown-body h2 { font-size: 1.5em; font-weight: 600; border-bottom: 1px solid var(--border-primary); padding-bottom: 0.3em; margin-bottom: 16px; margin-top: 24px; color: var(--text-headers); }
-        .markdown-body h3 { font-size: 1.25em; font-weight: 600; margin-bottom: 16px; margin-top: 24px; color: var(--text-headers); }
+        .markdown-body h1 { font-size: 1.75em; font-weight: 700; border-bottom: 1px solid var(--border-primary); padding-bottom: 0.3em; margin-bottom: 16px; margin-top: 24px; color: var(--text-headers); }
+        .markdown-body h2 { font-size: 1.35em; font-weight: 600; border-bottom: 1px solid var(--border-primary); padding-bottom: 0.3em; margin-bottom: 16px; margin-top: 24px; color: var(--text-headers); }
+        .markdown-body h3 { font-size: 1.15em; font-weight: 600; margin-bottom: 16px; margin-top: 24px; color: var(--text-headers); }
+        
+        @media (min-width: 640px) {
+            .markdown-body h1 { font-size: 2em; }
+            .markdown-body h2 { font-size: 1.5em; }
+            .markdown-body h3 { font-size: 1.25em; }
+        }
+
         .markdown-body p { margin-bottom: 16px; }
         .markdown-body strong { font-weight: 600; color: var(--text-headers); }
         .markdown-body em { font-style: italic; }
