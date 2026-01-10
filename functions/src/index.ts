@@ -14,6 +14,7 @@ export const getCopilotResponse = onRequest({
     res.status(405).send("Method Not Allowed");
     return;
   }
+  logger.info("Copilot request received - v2 (GenAI SDK)");
 
   const {
     messages,
