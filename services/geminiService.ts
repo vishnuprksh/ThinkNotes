@@ -1,44 +1,59 @@
-
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 import { Message } from "../types";
 
 const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
 
-export const getCopilotResponse = async (
+export const getCopilotResponseStream = async (
   messages: Message[],
-  editorContext: string
+  editorContent: string,
+  dbSchema: string,
+  currentVariables: string,
+  currentWriterScript: string,
+  currentReaderScript: string
 ) => {
   const ai = getAI();
-  // Switching to gemini-3-flash-preview as requested for higher speed and efficiency
-  const model = 'gemini-3-flash-preview';
+  const model = 'gemini-3-pro-preview';
   
-  const systemInstruction = `You are ThinkNotes AI, an elite research assistant and document editor.
-  
-  YOUR CORE MISSION: 
-  Provide factually accurate information by cross-referencing user claims with real-time Google Search data.
+  const systemInstruction = `You are thinkNotes AI, a high-order research agent. 
+  You follow a strict AGENTIC WORKFLOW for document transformation.
 
-  FACT-CHECKING PROTOCOL:
-  1. For factual queries, technical details, or data points, YOU MUST search Google first.
-  2. If search results are contradictory, mention the different perspectives.
-  3. Prioritize primary sources (official documentation, reputable news).
+  PIPELINE ARCHITECTURE:
+  Your data pipeline consists of two distinct JavaScript functions:
+  1. WRITER (Data Acquisition): An async function used to populate/hydrate the SQLite database. Accesses 'db' and 'fetchExternalData'.
+  2. READER (Data Extraction): An async function that queries the DB and returns a JSON object where keys are variable names and values are strings or Table objects.
 
-  DOCUMENT UPDATE PROTOCOL:
-  Use the following special syntax to update the user's note. You MUST provide the FULL content of the document inside this block.
-  
-  Syntax:
-  [[UPDATE: Short description of change]]
-  (The entire updated markdown content goes here)
-  [[/UPDATE]]
+  WORKFLOW STEPS:
+  1. DRAFTING: Analyze the request and current document.
+  2. DATA AUDIT: Check if the "Current Database Schema" supports the request.
+  3. PIPELINE SYNTHESIS:
+     - To acquire NEW data: Update the WRITER using [[UPDATE_WRITER]].
+     - To extract or compute variables: Update the READER using [[UPDATE_READER]].
+  4. FINAL TRANSFORMATION: Update the document using [[UPDATE]] and {{variable_name}} syntax.
 
-  BEHAVIOR:
-  - Keep chat responses concise. 
-  - If a user asks to "verify this" or "expand on this", perform the search, verify facts, then apply the [[UPDATE]] to the document.
-  - Do not use any other tools besides googleSearch.
+  STRICT TAGS:
+  - [[UPDATE_WRITER]]
+    Provide the FULL replacement code for the async Writer function.
+    [[/UPDATE_WRITER]]
+    
+  - [[UPDATE_READER]]
+    Provide the FULL replacement code for the async Reader function. 
+    It MUST return an object: { var1: "val", table1: { columns: [], values: [] } }.
+    [[/UPDATE_READER]]
 
-  CURRENT DOCUMENT CONTEXT:
-  """
-  ${editorContext}
-  """`;
+  - [[UPDATE: title]]
+    Full updated Markdown for the document.
+    [[/UPDATE]]
+
+  CURRENT STATE:
+  - Schema: ${dbSchema || "Empty"}
+  - Current Variables: ${currentVariables || "None"}
+  - Writer Script: 
+  """${currentWriterScript}"""
+  - Reader Script:
+  """${currentReaderScript}"""
+
+  CURRENT DOCUMENT:
+  """${editorContent}"""`;
 
   const conversation = messages.map(m => ({
     role: m.role === 'user' ? 'user' : 'model',
@@ -46,36 +61,19 @@ export const getCopilotResponse = async (
   }));
 
   try {
-    const response: GenerateContentResponse = await ai.models.generateContent({
+    const stream = await ai.models.generateContentStream({
       model: model,
       contents: conversation as any,
       config: {
         systemInstruction: systemInstruction,
-        tools: [{ googleSearch: {} }],
-        // Adjusted thinking budget for the flash model to ensure snappy responses
+        tools: [{ googleSearch: {} }], 
         thinkingConfig: { thinkingBudget: 16000 }
       },
     });
 
-    const fullText = response.text || "";
-    const groundingMetadata = response.candidates?.[0]?.groundingMetadata;
-    const groundingChunks = groundingMetadata?.groundingChunks || [];
-    const searchEntryPointHtml = groundingMetadata?.searchEntryPoint?.htmlContent;
-    
-    const urls = groundingChunks
-      .filter(chunk => chunk.web)
-      .map(chunk => ({
-        title: chunk.web?.title || 'Source',
-        uri: chunk.web?.uri || ''
-      }));
-
-    return {
-      text: fullText,
-      urls,
-      searchEntryPointHtml
-    };
+    return stream;
   } catch (error) {
-    console.error("ThinkNotes API Error:", error);
+    console.error("thinkNotes API Error:", error);
     throw error;
   }
 };

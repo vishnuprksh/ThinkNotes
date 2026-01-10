@@ -1,8 +1,8 @@
-
 export interface Message {
   id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
+  thought?: string;
   timestamp: number;
   groundingUrls?: Array<{ title: string; uri: string }>;
   searchEntryPointHtml?: string;
@@ -10,20 +10,43 @@ export interface Message {
   checkpointIndex?: number;
 }
 
-export interface Checkpoint {
+export interface GlobalState {
   content: string;
-  timestamp: number;
+  writerScript: string;
+  readerScript: string;
+  variables: Record<string, string | TableData>;
   description: string;
+  timestamp: number;
 }
 
-export interface EditorState {
-  content: string;
-  isSaving: boolean;
-  lastSaved: number | null;
+export type ViewMode = 'preview' | 'edit' | 'edit_diff' | 'db' | 'api' | 'api_diff';
+
+export interface TableData {
+  columns: string[];
+  values: any[][];
 }
 
-export enum SidebarTab {
-  CHAT = 'chat',
-  HISTORY = 'history',
-  SETTINGS = 'settings'
+export interface TableInfo {
+  name: string;
+  columns: string[];
+  rows: any[][];
+}
+
+export interface DatabaseState {
+  tables: TableInfo[];
+  lastQuery?: string;
+  error?: string;
+  isSyncing?: boolean;
+}
+
+export interface Template {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+}
+
+export interface PipelineState {
+  writerScript: string;
+  readerScript: string;
 }
