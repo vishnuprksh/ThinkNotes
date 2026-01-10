@@ -31,13 +31,13 @@ const STAGES = [
   "Applying Transformations"
 ];
 
-const ChatPanel: React.FC<ChatPanelProps> = ({ 
-  editorContent, 
-  messages, 
-  setMessages, 
-  onUpdateDocument, 
+const ChatPanel: React.FC<ChatPanelProps> = ({
+  editorContent,
+  messages,
+  setMessages,
+  onUpdateDocument,
   restoreCheckpoint,
-  dbSchema, 
+  dbSchema,
   executeSql,
   fetchExternalData,
   setAllVariables,
@@ -85,11 +85,11 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
       const currentVarsString = Object.entries(variables)
         .map(([k, v]) => `${k}: ${typeof v === 'string' ? v : '[Table]'}`)
         .join(', ');
-      
+
       const stream = await getCopilotResponseStream(
-        [...messages, userMsg], 
-        editorContent, 
-        dbSchema, 
+        [...messages, userMsg],
+        editorContent,
+        dbSchema,
         currentVarsString,
         writerScript,
         readerScript
@@ -125,7 +125,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
           }
         }
       }
-      
+
       let pendingWriter = writerScript;
       let pendingReader = readerScript;
       let pipelineUpdated = false;
@@ -148,8 +148,10 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
         setMessages(prev => [...prev, { id: Date.now().toString(), role: 'system', content: `🔍 Assistant: Mapping Variables...`, timestamp: Date.now() }]);
       }
 
+      let finalVariables = variables;
       if (pipelineUpdated) {
-        await handleSync({ writer: pendingWriter, reader: pendingReader });
+        const resultVars = await handleSync({ writer: pendingWriter, reader: pendingReader });
+        if (resultVars) finalVariables = resultVars;
       }
 
       let cleanedChat = fullText
@@ -174,10 +176,11 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
 
       // CRITICAL: We record the global state AFTER all potential updates (Scripts + Content)
       // to ensure the checkpoint represents the state RESULTING from this message.
-      const checkpointIndex = recordGlobalState(reason, { 
-        content: finalContent, 
-        writerScript: pendingWriter, 
-        readerScript: pendingReader 
+      const checkpointIndex = recordGlobalState(reason, {
+        content: finalContent,
+        writerScript: pendingWriter,
+        readerScript: pendingReader,
+        variables: finalVariables
       });
 
       const assistantMessage: Message = {
@@ -225,11 +228,11 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
         {messages.length === 0 && (
           <div className="text-center py-10 sm:py-12 space-y-4">
             <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl flex items-center justify-center mx-auto shadow-2xl border relative overflow-hidden group" style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border-primary)', color: 'var(--accent-primary)' }}>
-               <svg className="w-8 h-8 sm:w-9 sm:h-9 relative z-10" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+              <svg className="w-8 h-8 sm:w-9 sm:h-9 relative z-10" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
             </div>
             <div className="space-y-1 px-4">
-               <p className="text-xs sm:text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Waiting for instructions</p>
-               <p className="text-[10px] sm:text-xs max-w-[220px] mx-auto leading-relaxed" style={{ color: 'var(--text-secondary)' }}>I can help you research, organize data, or transform this document.</p>
+              <p className="text-xs sm:text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Waiting for instructions</p>
+              <p className="text-[10px] sm:text-xs max-w-[220px] mx-auto leading-relaxed" style={{ color: 'var(--text-secondary)' }}>I can help you research, organize data, or transform this document.</p>
             </div>
           </div>
         )}
@@ -237,33 +240,33 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
         {messages.map((m) => (
           <div key={m.id} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
             {m.role === 'assistant' && m.thought && (
-               <details className="mb-2 w-full max-w-[95%] sm:max-w-[90%] group">
-                  <summary className="text-[9px] sm:text-[10px] font-bold uppercase tracking-widest cursor-pointer list-none py-1 px-2.5 sm:px-3 border rounded-lg hover:bg-white/5 inline-flex items-center gap-2" style={{ color: 'var(--text-secondary)', borderColor: 'var(--border-primary)' }}>
-                    <svg className="w-2.5 h-2.5 sm:w-3 h-3 transition-transform group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-                    Reasoning
-                  </summary>
-                  <div className="mt-2 p-2.5 sm:p-3 rounded-lg border text-[10px] sm:text-[11px] leading-relaxed italic bg-black/5" style={{ color: 'var(--text-secondary)', borderColor: 'var(--border-primary)' }}>
-                    {m.thought}
-                  </div>
-               </details>
+              <details className="mb-2 w-full max-w-[95%] sm:max-w-[90%] group">
+                <summary className="text-[9px] sm:text-[10px] font-bold uppercase tracking-widest cursor-pointer list-none py-1 px-2.5 sm:px-3 border rounded-lg hover:bg-white/5 inline-flex items-center gap-2" style={{ color: 'var(--text-secondary)', borderColor: 'var(--border-primary)' }}>
+                  <svg className="w-2.5 h-2.5 sm:w-3 h-3 transition-transform group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                  Reasoning
+                </summary>
+                <div className="mt-2 p-2.5 sm:p-3 rounded-lg border text-[10px] sm:text-[11px] leading-relaxed italic bg-black/5" style={{ color: 'var(--text-secondary)', borderColor: 'var(--border-primary)' }}>
+                  {m.thought}
+                </div>
+              </details>
             )}
-            <div className={`max-w-[95%] sm:max-w-[90%] rounded-2xl p-3 sm:p-4 text-xs sm:text-sm shadow-sm transition-all relative border ${m.role === 'user' ? 'text-white rounded-tr-none' : m.role === 'system' ? 'italic text-[9px] sm:text-[10px] py-1 px-2.5 sm:px-3 bg-black/10 border-transparent' : 'rounded-tl-none'}`} 
-            style={{ 
-              backgroundColor: m.role === 'user' ? 'var(--accent-primary)' : m.role === 'system' ? 'transparent' : 'var(--bg-secondary)',
-              borderColor: m.role === 'system' ? 'transparent' : 'var(--border-primary)',
-              color: m.role === 'assistant' ? 'var(--text-primary)' : m.role === 'user' ? '#ffffff' : 'var(--text-secondary)'
-            }}>
+            <div className={`max-w-[95%] sm:max-w-[90%] rounded-2xl p-3 sm:p-4 text-xs sm:text-sm shadow-sm transition-all relative border ${m.role === 'user' ? 'text-white rounded-tr-none' : m.role === 'system' ? 'italic text-[9px] sm:text-[10px] py-1 px-2.5 sm:px-3 bg-black/10 border-transparent' : 'rounded-tl-none'}`}
+              style={{
+                backgroundColor: m.role === 'user' ? 'var(--accent-primary)' : m.role === 'system' ? 'transparent' : 'var(--bg-secondary)',
+                borderColor: m.role === 'system' ? 'transparent' : 'var(--border-primary)',
+                color: m.role === 'assistant' ? 'var(--text-primary)' : m.role === 'user' ? '#ffffff' : 'var(--text-secondary)'
+              }}>
               <div className="whitespace-pre-wrap leading-relaxed">{m.content}</div>
-              
+
               {m.role === 'assistant' && m.checkpointIndex !== undefined && (
                 <div className="mt-4 flex justify-end">
-                   <button 
+                  <button
                     onClick={() => restoreCheckpoint(m.checkpointIndex!)}
                     className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/30 hover:bg-indigo-500/20 transition-all flex items-center gap-1.5"
-                   >
-                     <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" /></svg>
-                     Restore Point
-                   </button>
+                  >
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" /></svg>
+                    Restore Point
+                  </button>
                 </div>
               )}
 
@@ -284,34 +287,34 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
 
         {isLoading && (
           <div className="flex flex-col gap-3 sm:gap-4 max-w-[95%] sm:max-w-[90%]">
-             {streamingThought && (
-               <div className="p-2.5 sm:p-3 rounded-lg border border-dashed text-[10px] sm:text-[11px] leading-relaxed italic bg-black/5 animate-pulse" style={{ color: 'var(--text-secondary)', borderColor: 'var(--border-primary)' }}>
-                 <div className="font-bold uppercase tracking-widest text-[8px] sm:text-[9px] mb-1">Inference:</div>
-                 {streamingThought}
-               </div>
-             )}
-             
-             {streamingContent && (
-                <div className="p-3 sm:p-4 rounded-2xl rounded-tl-none border text-xs sm:text-sm" style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border-primary)', color: 'var(--text-primary)' }}>
-                   <div className="whitespace-pre-wrap leading-relaxed">{streamingContent}</div>
-                </div>
-             )}
+            {streamingThought && (
+              <div className="p-2.5 sm:p-3 rounded-lg border border-dashed text-[10px] sm:text-[11px] leading-relaxed italic bg-black/5 animate-pulse" style={{ color: 'var(--text-secondary)', borderColor: 'var(--border-primary)' }}>
+                <div className="font-bold uppercase tracking-widest text-[8px] sm:text-[9px] mb-1">Inference:</div>
+                {streamingThought}
+              </div>
+            )}
 
-             {!streamingContent && !streamingThought && (
-               <div className="flex items-center gap-3 sm:gap-4 p-3 sm:p-4 rounded-2xl border bg-black/5" style={{ borderColor: 'var(--border-primary)' }}>
-                  <div className="relative w-6 h-6 sm:w-8 sm:h-8 flex items-center justify-center shrink-0">
-                    <div className="absolute inset-0 border-2 border-indigo-500/20 rounded-full"></div>
-                    <div className="absolute inset-0 border-2 border-t-indigo-500 rounded-full animate-spin"></div>
-                    <svg className="w-3 h-3 sm:w-4 h-4 text-indigo-500 animate-pulse" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-[9px] sm:text-[10px] font-bold text-indigo-400 uppercase tracking-widest animate-pulse">
-                      {STAGES[currentStageIndex]}
-                    </span>
-                    <span className="text-[8px] sm:text-[9px] text-theme-muted">Assistant is working...</span>
-                  </div>
-               </div>
-             )}
+            {streamingContent && (
+              <div className="p-3 sm:p-4 rounded-2xl rounded-tl-none border text-xs sm:text-sm" style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border-primary)', color: 'var(--text-primary)' }}>
+                <div className="whitespace-pre-wrap leading-relaxed">{streamingContent}</div>
+              </div>
+            )}
+
+            {!streamingContent && !streamingThought && (
+              <div className="flex items-center gap-3 sm:gap-4 p-3 sm:p-4 rounded-2xl border bg-black/5" style={{ borderColor: 'var(--border-primary)' }}>
+                <div className="relative w-6 h-6 sm:w-8 sm:h-8 flex items-center justify-center shrink-0">
+                  <div className="absolute inset-0 border-2 border-indigo-500/20 rounded-full"></div>
+                  <div className="absolute inset-0 border-2 border-t-indigo-500 rounded-full animate-spin"></div>
+                  <svg className="w-3 h-3 sm:w-4 h-4 text-indigo-500 animate-pulse" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-[9px] sm:text-[10px] font-bold text-indigo-400 uppercase tracking-widest animate-pulse">
+                    {STAGES[currentStageIndex]}
+                  </span>
+                  <span className="text-[8px] sm:text-[9px] text-theme-muted">Assistant is working...</span>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

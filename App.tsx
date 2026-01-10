@@ -61,11 +61,11 @@ const App: React.FC = () => {
   const [currentTheme, setCurrentTheme] = useState<AppTheme>(THEMES[0]);
   const [isTemplateMenuOpen, setIsTemplateMenuOpen] = useState(false);
   const [isTemplateLoading, setIsTemplateLoading] = useState(false);
-  
+
   // Database State
   const [db, setDb] = useState<any>(null);
   const [dbState, setDbState] = useState<DatabaseState>({ tables: [], isSyncing: false });
-  
+
   // Script and Var State
   const [writerScript, setWriterScript] = useState(DEFAULT_WRITER);
   const [readerScript, setReaderScript] = useState(DEFAULT_READER);
@@ -154,19 +154,17 @@ const App: React.FC = () => {
       description,
       timestamp: Date.now()
     };
-    
-    let newIndex = 0;
-    setHistory(prev => {
-      newIndex = prev.length;
-      return [...prev, next];
-    });
-    return newIndex;
-  }, [content, writerScript, readerScript, variables]);
+
+    setHistory(prev => [...prev, next]);
+    // The next item will be pushed to the end, so its index in the updated array 
+    // will be the current length of the array.
+    return history.length;
+  }, [content, writerScript, readerScript, variables, history.length]);
 
   const handleSync = useCallback(async (overridingScripts?: { writer?: string; reader?: string }) => {
-    if (!db || dbState.isSyncing) return;
+    if (!db || dbState.isSyncing) return {};
     setDbState(prev => ({ ...prev, isSyncing: true, error: undefined }));
-    
+
     try {
       if (overridingScripts?.writer) {
         const writerRunner = (0, eval)(`(${overridingScripts.writer})`);
@@ -179,12 +177,13 @@ const App: React.FC = () => {
       const readerToRun = overridingScripts?.reader || readerScript;
       const readerRunner = (0, eval)(`(${readerToRun})`);
       const newVars = await readerRunner({ db });
-      
+
       if (newVars && typeof newVars === 'object') {
         setVariables(newVars);
       }
 
       refreshDbState(db);
+      return newVars || {};
     } catch (e: any) {
       console.error("Pipeline Error:", e);
       setDbState(prev => ({ ...prev, error: `Pipeline Error: ${e.message}` }));
@@ -197,23 +196,35 @@ const App: React.FC = () => {
   const restoreCheckpoint = useCallback(async (index: number) => {
     if (index < 0 || index >= history.length) return;
     const checkpoint = history[index];
-    
+
     // 1. Update primary editor and script states
     setContent(checkpoint.content);
     setWriterScript(checkpoint.writerScript);
     setReaderScript(checkpoint.readerScript);
     setVariables(checkpoint.variables);
 
-    // 2. Clear current messages (optional, keep convo flow but indicate restore)
-    setMessages(prev => [...prev, { 
-      id: Date.now().toString(), 
-      role: 'system', 
-      content: `⏪ System: Restored workspace to point: "${checkpoint.description}"`, 
-      timestamp: Date.now() 
-    }]);
+    // 2. Truncate history to the point we are restoring to
+    setHistory(prev => prev.slice(0, index + 1));
 
-    // 3. Trigger a system-wide re-sync to ensure the Database matches the restored scripts
-    // This is crucial because the DB is in-memory and not stored in history.
+    // 3. Remove all messages that occurred after this checkpoint
+    setMessages(prev => {
+      const filtered = prev.filter(m => {
+        // Keep system messages or messages with index <= current restore index
+        if (m.role === 'system') return true;
+        if (m.checkpointIndex !== undefined && m.checkpointIndex > index) return false;
+        // Basic heuristic: if it doesn't have an index, it might be a user message 
+        // leading to a future checkpoint. Filter by timestamp relative to checkpoint.
+        return m.timestamp <= checkpoint.timestamp;
+      });
+      return [...filtered, {
+        id: Date.now().toString(),
+        role: 'system',
+        content: `⏪ System: Restored workspace to: "${checkpoint.description}"`,
+        timestamp: Date.now()
+      }];
+    });
+
+    // 4. Trigger a system-wide re-sync to ensure the Database matches the restored scripts
     if (db) {
       setDbState(prev => ({ ...prev, isSyncing: true }));
       try {
@@ -325,9 +336,9 @@ const App: React.FC = () => {
       } else {
         const table = value as TableData;
         const mdTable = [
-            `| ${table.columns.join(' | ')} |`,
-            `| ${table.columns.map(() => '---').join(' | ')} |`,
-            ...table.values.map(row => `| ${row.map(cell => String(cell)).join(' | ')} |`)
+          `| ${table.columns.join(' | ')} |`,
+          `| ${table.columns.map(() => '---').join(' | ')} |`,
+          ...table.values.map(row => `| ${row.map(cell => String(cell)).join(' | ')} |`)
         ].join('\n');
         result = result.replace(regex, mdTable);
       }
@@ -400,7 +411,7 @@ const App: React.FC = () => {
               </div>
               <span className="font-bold text-sm sm:text-base tracking-tight hidden xs:inline-block">thinkNotes</span>
             </div>
-            
+
             <div className="relative shrink-0" ref={templateMenuRef}>
               <button onClick={() => setIsTemplateMenuOpen(!isTemplateMenuOpen)} className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg border text-[10px] sm:text-xs font-bold transition-all hover:bg-white/5" style={{ borderColor: 'var(--border-primary)', color: 'var(--text-secondary)' }}>
                 <span className="hidden sm:inline">Templates</span>
@@ -409,14 +420,14 @@ const App: React.FC = () => {
               </button>
               {isTemplateMenuOpen && (
                 <div className="absolute left-0 mt-2 w-64 rounded-xl border shadow-2xl z-50 overflow-hidden" style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border-primary)', backdropFilter: 'blur(8px)' }}>
-                   {TEMPLATES.map(t => (
+                  {TEMPLATES.map(t => (
                     <button key={t.id} onClick={() => applyTemplate(t.id)} className="w-full text-left p-3 hover:bg-white/5 border-b last:border-0" style={{ borderColor: 'var(--border-primary)' }}>
                       <div className="flex items-center gap-3">
                         <span className="text-xl">{t.icon}</span>
                         <div><p className="text-xs font-bold text-white">{t.name}</p><p className="text-[10px] text-theme-muted">{t.description}</p></div>
                       </div>
                     </button>
-                   ))}
+                  ))}
                 </div>
               )}
             </div>
@@ -424,22 +435,22 @@ const App: React.FC = () => {
             {(!isEmpty || !showWelcome) && (
               <div className="flex gap-1 p-0.5 rounded-lg border overflow-x-auto scrollbar-none whitespace-nowrap hide-scrollbar" style={{ backgroundColor: 'var(--bg-primary)', borderColor: 'var(--border-primary)' }}>
                 {['Preview', 'Edit', 'Edit_Diff', 'DB', 'API', 'API_Diff'].map((m) => {
-                   const val = m.toLowerCase() as ViewMode;
-                   const active = viewMode === val;
-                   if (val === 'api_diff' && history.length < 2) return null;
-                   if (val === 'edit_diff' && history.length < 2) return null;
-                   return (
+                  const val = m.toLowerCase() as ViewMode;
+                  const active = viewMode === val;
+                  if (val === 'api_diff' && history.length < 2) return null;
+                  if (val === 'edit_diff' && history.length < 2) return null;
+                  return (
                     <button key={m} onClick={() => setViewMode(val)} className={`px-2.5 py-1 rounded-md text-[10px] sm:text-xs font-medium shrink-0 ${active ? 'text-white' : ''}`}
                       style={{ backgroundColor: active ? 'var(--border-primary)' : 'transparent', color: active ? '#ffffff' : 'var(--text-secondary)' }}
                     >{m.replace('_', ' ')}</button>
-                   );
+                  );
                 })}
               </div>
             )}
           </div>
 
           <div className="flex items-center gap-1 sm:gap-3 ml-2">
-             <button onClick={handleExport} title="Export processed Markdown" className="hidden xs:flex p-1.5 sm:p-2 rounded-lg border hover:bg-white/5 transition-colors" style={{ borderColor: 'var(--border-primary)', backgroundColor: 'var(--bg-primary)' }}>
+            <button onClick={handleExport} title="Export processed Markdown" className="hidden xs:flex p-1.5 sm:p-2 rounded-lg border hover:bg-white/5 transition-colors" style={{ borderColor: 'var(--border-primary)', backgroundColor: 'var(--bg-primary)' }}>
               <svg className="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1M7 10l5 5m0 0l5-5m-5 5V3" /></svg>
             </button>
             <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className={`p-1.5 sm:p-2 rounded-lg transition-all ${isSidebarOpen ? 'bg-indigo-900/20' : 'hover:bg-white/5'}`} style={{ color: isSidebarOpen ? 'var(--accent-primary)' : 'var(--text-secondary)' }}>
@@ -460,25 +471,25 @@ const App: React.FC = () => {
 
           {isEmpty && showWelcome ? (
             <div className="flex-1 flex flex-col items-center justify-center p-4 sm:p-6 text-center animate-in fade-in zoom-in duration-500 overflow-y-auto">
-               <div className="max-w-md w-full space-y-6 sm:space-y-8">
-                  <div className="w-16 h-16 sm:w-20 sm:h-20 bg-indigo-500/10 rounded-3xl flex items-center justify-center mx-auto border border-indigo-500/20">
-                    <svg className="w-8 h-8 sm:w-10 sm:h-10 text-indigo-500" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-                  </div>
-                  <div className="space-y-2 sm:space-y-3 px-2">
-                    <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">thinkNotes</h1>
-                    <p className="text-xs sm:text-sm text-theme-muted leading-relaxed">A powerful markdown workspace where an intelligent assistant manages data, research, and document transformation via agentic pipelines.</p>
-                  </div>
-                  <div className="grid grid-cols-1 xs:grid-cols-2 gap-3 sm:gap-4 px-2">
-                     {TEMPLATES.filter(t => t.id !== 'blank').map(t => (
-                       <button key={t.id} onClick={() => applyTemplate(t.id)} className="p-3 sm:p-4 rounded-2xl border text-left hover:border-indigo-500/50 hover:bg-white/5 transition-all group" style={{ borderColor: 'var(--border-primary)' }}>
-                          <span className="text-xl sm:text-2xl mb-2 sm:mb-3 block group-hover:scale-110 transition-transform">{t.icon}</span>
-                          <p className="text-xs sm:text-sm font-bold text-white mb-0.5 sm:mb-1">{t.name}</p>
-                          <p className="text-[9px] sm:text-[10px] text-theme-muted">{t.description}</p>
-                       </button>
-                     ))}
-                  </div>
-                  <button onClick={() => applyTemplate('blank')} className="text-[10px] sm:text-xs font-bold text-indigo-500 hover:text-indigo-400 underline underline-offset-4">Start with a blank note</button>
-               </div>
+              <div className="max-w-md w-full space-y-6 sm:space-y-8">
+                <div className="w-16 h-16 sm:w-20 sm:h-20 bg-indigo-500/10 rounded-3xl flex items-center justify-center mx-auto border border-indigo-500/20">
+                  <svg className="w-8 h-8 sm:w-10 sm:h-10 text-indigo-500" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                </div>
+                <div className="space-y-2 sm:space-y-3 px-2">
+                  <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">thinkNotes</h1>
+                  <p className="text-xs sm:text-sm text-theme-muted leading-relaxed">A powerful markdown workspace where an intelligent assistant manages data, research, and document transformation via agentic pipelines.</p>
+                </div>
+                <div className="grid grid-cols-1 xs:grid-cols-2 gap-3 sm:gap-4 px-2">
+                  {TEMPLATES.filter(t => t.id !== 'blank').map(t => (
+                    <button key={t.id} onClick={() => applyTemplate(t.id)} className="p-3 sm:p-4 rounded-2xl border text-left hover:border-indigo-500/50 hover:bg-white/5 transition-all group" style={{ borderColor: 'var(--border-primary)' }}>
+                      <span className="text-xl sm:text-2xl mb-2 sm:mb-3 block group-hover:scale-110 transition-transform">{t.icon}</span>
+                      <p className="text-xs sm:text-sm font-bold text-white mb-0.5 sm:mb-1">{t.name}</p>
+                      <p className="text-[9px] sm:text-[10px] text-theme-muted">{t.description}</p>
+                    </button>
+                  ))}
+                </div>
+                <button onClick={() => applyTemplate('blank')} className="text-[10px] sm:text-xs font-bold text-indigo-500 hover:text-indigo-400 underline underline-offset-4">Start with a blank note</button>
+              </div>
             </div>
           ) : (
             <div className="flex-1 overflow-hidden relative">
@@ -503,8 +514,8 @@ const App: React.FC = () => {
                   <div className="border rounded-2xl p-4 sm:p-6 font-mono text-[10px] sm:text-sm space-y-0.5 shadow-xl leading-relaxed" style={{ borderColor: 'var(--border-primary)', backgroundColor: 'var(--bg-secondary)' }}>
                     {contentDiff.map((l, idx) => (
                       <div key={idx} className={`whitespace-pre-wrap ${l.type === 'added' ? 'bg-emerald-500/20 text-emerald-400' : l.type === 'removed' ? 'bg-rose-500/20 text-rose-400' : 'text-theme-muted'}`}>
-                         <span className="inline-block w-4 mr-2 opacity-50">{l.type === 'added' ? '+' : l.type === 'removed' ? '-' : ' '}</span>
-                         {l.content}
+                        <span className="inline-block w-4 mr-2 opacity-50">{l.type === 'added' ? '+' : l.type === 'removed' ? '-' : ' '}</span>
+                        {l.content}
                       </div>
                     ))}
                   </div>
@@ -518,15 +529,15 @@ const App: React.FC = () => {
                   </div>
                   {dbState.tables.length === 0 ? (
                     <div className="border border-dashed rounded-2xl p-8 sm:p-12 text-center" style={{ borderColor: 'var(--border-primary)' }}>
-                       <p className="text-[10px] sm:text-xs text-theme-muted">No tables found. Ask the Assistant to hydrate data.</p>
+                      <p className="text-[10px] sm:text-xs text-theme-muted">No tables found. Ask the Assistant to hydrate data.</p>
                     </div>
                   ) : (
                     <div className="space-y-6">
                       {dbState.tables.map(table => (
                         <div key={table.name} className="border rounded-xl overflow-hidden shadow-xl" style={{ borderColor: 'var(--border-primary)', backgroundColor: 'var(--bg-secondary)' }}>
                           <div className="px-4 py-2 border-b flex items-center justify-between" style={{ borderColor: 'var(--border-primary)' }}>
-                             <span className="text-[10px] sm:text-xs font-bold font-mono text-indigo-400">{table.name}</span>
-                             <span className="text-[8px] sm:text-[10px] text-theme-muted">{table.rows.length} rows</span>
+                            <span className="text-[10px] sm:text-xs font-bold font-mono text-indigo-400">{table.name}</span>
+                            <span className="text-[8px] sm:text-[10px] text-theme-muted">{table.rows.length} rows</span>
                           </div>
                           <div className="overflow-x-auto">
                             <table className="w-full text-left text-[9px] sm:text-[11px] border-collapse">
@@ -554,16 +565,16 @@ const App: React.FC = () => {
                 <div className="h-full overflow-hidden flex flex-col p-4 sm:p-6 animate-in fade-in duration-300">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 h-full overflow-y-auto sm:overflow-hidden">
                     <div className="flex flex-col h-[300px] sm:h-full border rounded-2xl overflow-hidden shadow-2xl shrink-0" style={{ borderColor: 'var(--border-primary)', backgroundColor: 'var(--bg-secondary)' }}>
-                       <div className="p-3 border-b flex items-center justify-between" style={{ borderColor: 'var(--border-primary)' }}>
-                          <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-400">Writer (Async)</span>
-                       </div>
-                       <textarea value={writerScript} onChange={(e) => setWriterScript(e.target.value)} onBlur={() => recordGlobalState('Script Update')} className="flex-1 bg-transparent p-4 font-mono text-[10px] sm:text-[11px] text-indigo-300 focus:outline-none leading-relaxed resize-none" />
+                      <div className="p-3 border-b flex items-center justify-between" style={{ borderColor: 'var(--border-primary)' }}>
+                        <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-400">Writer (Async)</span>
+                      </div>
+                      <textarea value={writerScript} onChange={(e) => setWriterScript(e.target.value)} onBlur={() => recordGlobalState('Script Update')} className="flex-1 bg-transparent p-4 font-mono text-[10px] sm:text-[11px] text-indigo-300 focus:outline-none leading-relaxed resize-none" />
                     </div>
                     <div className="flex flex-col h-[300px] sm:h-full border rounded-2xl overflow-hidden shadow-2xl shrink-0" style={{ borderColor: 'var(--border-primary)', backgroundColor: 'var(--bg-secondary)' }}>
-                       <div className="p-3 border-b flex items-center justify-between" style={{ borderColor: 'var(--border-primary)' }}>
-                          <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-400">Reader (Async)</span>
-                       </div>
-                       <textarea value={readerScript} onChange={(e) => setReaderScript(e.target.value)} onBlur={() => recordGlobalState('Script Update')} className="flex-1 bg-transparent p-4 font-mono text-[10px] sm:text-[11px] text-emerald-300 focus:outline-none leading-relaxed resize-none" />
+                      <div className="p-3 border-b flex items-center justify-between" style={{ borderColor: 'var(--border-primary)' }}>
+                        <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-400">Reader (Async)</span>
+                      </div>
+                      <textarea value={readerScript} onChange={(e) => setReaderScript(e.target.value)} onBlur={() => recordGlobalState('Script Update')} className="flex-1 bg-transparent p-4 font-mono text-[10px] sm:text-[11px] text-emerald-300 focus:outline-none leading-relaxed resize-none" />
                     </div>
                   </div>
                 </div>
@@ -575,8 +586,8 @@ const App: React.FC = () => {
                     <div className="border rounded-2xl p-4 font-mono text-[9px] sm:text-[11px] space-y-0.5 shadow-xl" style={{ borderColor: 'var(--border-primary)', backgroundColor: 'var(--bg-secondary)' }}>
                       {writerDiff.map((l, idx) => (
                         <div key={idx} className={`${l.type === 'added' ? 'bg-emerald-500/20 text-emerald-400' : l.type === 'removed' ? 'bg-rose-500/20 text-rose-400' : 'text-theme-muted'}`}>
-                           <span className="inline-block w-4 mr-1 sm:mr-2">{l.type === 'added' ? '+' : l.type === 'removed' ? '-' : ' '}</span>
-                           {l.content}
+                          <span className="inline-block w-4 mr-1 sm:mr-2">{l.type === 'added' ? '+' : l.type === 'removed' ? '-' : ' '}</span>
+                          {l.content}
                         </div>
                       ))}
                     </div>
@@ -586,8 +597,8 @@ const App: React.FC = () => {
                     <div className="border rounded-2xl p-4 font-mono text-[9px] sm:text-[11px] space-y-0.5 shadow-xl" style={{ borderColor: 'var(--border-primary)', backgroundColor: 'var(--bg-secondary)' }}>
                       {readerDiff.map((l, idx) => (
                         <div key={idx} className={`${l.type === 'added' ? 'bg-emerald-500/20 text-emerald-400' : l.type === 'removed' ? 'bg-rose-500/20 text-rose-400' : 'text-theme-muted'}`}>
-                           <span className="inline-block w-4 mr-1 sm:mr-2">{l.type === 'added' ? '+' : l.type === 'removed' ? '-' : ' '}</span>
-                           {l.content}
+                          <span className="inline-block w-4 mr-1 sm:mr-2">{l.type === 'added' ? '+' : l.type === 'removed' ? '-' : ' '}</span>
+                          {l.content}
                         </div>
                       ))}
                     </div>
@@ -600,25 +611,25 @@ const App: React.FC = () => {
       </div>
 
       {/* Responsive Sidebar (Drawer on mobile) */}
-      <div 
+      <div
         className={`fixed inset-0 z-40 lg:hidden transition-opacity duration-300 ${isSidebarOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
         onClick={() => setIsSidebarOpen(false)}
         style={{ backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}
       />
-      
-      <aside 
-        className={`fixed top-0 right-0 h-full z-50 transition-transform duration-300 transform lg:static lg:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : 'translate-x-full'} flex flex-col shrink-0 overflow-hidden shadow-2xl lg:shadow-none`} 
-        style={{ 
-          width: 'min(90%, 420px)', 
-          backgroundColor: 'var(--bg-secondary)', 
+
+      <aside
+        className={`fixed top-0 right-0 h-full z-50 transition-transform duration-300 transform lg:static lg:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : 'translate-x-full'} flex flex-col shrink-0 overflow-hidden shadow-2xl lg:shadow-none`}
+        style={{
+          width: 'min(90%, 420px)',
+          backgroundColor: 'var(--bg-secondary)',
           borderColor: 'var(--border-primary)',
           borderLeftWidth: '1px'
         }}
       >
-        <ChatPanel 
-          editorContent={content} 
-          messages={messages} 
-          setMessages={setMessages} 
+        <ChatPanel
+          editorContent={content}
+          messages={messages}
+          setMessages={setMessages}
           onUpdateDocument={handleUpdateDocument}
           restoreCheckpoint={restoreCheckpoint}
           dbSchema={dbSchemaString}
