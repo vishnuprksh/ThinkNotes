@@ -100,30 +100,10 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
       let groundingUrls: any[] = [];
       let searchEntryPointHtml = "";
 
-      for await (const chunk of stream) {
-        const parts = chunk.candidates?.[0]?.content?.parts || [];
-        for (const part of parts) {
-          if (part.thought) {
-            fullThought += part.thought;
-            setStreamingThought(fullThought);
-          }
-          if (part.text) {
-            fullText += part.text;
-            setStreamingContent(fullText);
-          }
-        }
-
-        const metadata = chunk.candidates?.[0]?.groundingMetadata;
-        if (metadata) {
-          if (metadata.groundingChunks) {
-            groundingUrls = metadata.groundingChunks
-              .filter(c => c.web)
-              .map(c => ({ title: c.web?.title || 'Source', uri: c.web?.uri || '' }));
-          }
-          if (metadata.searchEntryPoint?.htmlContent) {
-            searchEntryPointHtml = metadata.searchEntryPoint.htmlContent;
-          }
-        }
+      for await (const chunk of stream.stream) {
+        const chunkText = chunk.text();
+        fullText += chunkText;
+        setStreamingContent(fullText);
       }
 
       let pendingWriter = writerScript;

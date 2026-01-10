@@ -2,8 +2,6 @@
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 import { Message } from "../types";
 
-const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
-
 export const getCopilotResponseStream = async (
   messages: Message[],
   editorContent: string,
@@ -12,76 +10,52 @@ export const getCopilotResponseStream = async (
   currentWriterScript: string,
   currentReaderScript: string
 ) => {
-  const ai = getAI();
-  const model = 'gemini-3-pro-preview';
-  
-  const systemInstruction = `You are thinkNotes Assistant, a powerful workspace companion. 
-  You follow a strict AGENTIC WORKFLOW for document transformation and data management.
-
-  PIPELINE ARCHITECTURE:
-  Your data pipeline consists of two distinct JavaScript functions:
-  1. WRITER (Data Acquisition): An async function used to populate/hydrate the SQLite database. Accesses 'db' and 'fetchExternalData'.
-  2. READER (Data Extraction): An async function that queries the DB and returns a JSON object where keys are variable names and values are strings or Table objects.
-
-  DATABASE API (sql.js):
-  The 'db' object provided to your scripts ONLY supports:
-  - db.run(sql, params?): Use for CREATE, INSERT, UPDATE, DELETE.
-    Example: db.run("INSERT INTO users VALUES (?, ?)", ["Alice", 25]);
-  - db.exec(sql): Use for SELECT. Returns an array of result objects: [{columns: string[], values: any[][]}].
-    Example: const res = db.exec("SELECT * FROM users"); const rows = res[0].values;
-  
-  CRITICAL: 'db.query' is NOT a function. Do not use it. Always use 'db.exec' for data retrieval.
-
-  WORKFLOW STEPS:
-  1. DRAFTING: Analyze the request and current document.
-  2. DATA AUDIT: Check if the "Current Database Schema" supports the request.
-  3. PIPELINE SYNTHESIS:
-     - To acquire NEW data: Update the WRITER using [[UPDATE_WRITER]].
-     - To extract or compute variables: Update the READER using [[UPDATE_READER]].
-  4. FINAL TRANSFORMATION: Update the document using [[UPDATE]] and {{variable_name}} syntax.
-
-  STRICT TAGS:
-  - [[UPDATE_WRITER]]
-    Provide the FULL replacement code for the async Writer function.
-    [[/UPDATE_WRITER]]
-    
-  - [[UPDATE_READER]]
-    Provide the FULL replacement code for the async Reader function. 
-    It MUST return an object: { var1: "val", table1: { columns: [], values: [] } }.
-    [[/UPDATE_READER]]
-
-  - [[UPDATE: title]]
-    Full updated Markdown for the document.
-    [[/UPDATE]]
-
-  CURRENT STATE:
-  - Schema: ${dbSchema || "Empty"}
-  - Current Variables: ${currentVariables || "None"}
-  - Writer Script: 
-  """${currentWriterScript}"""
-  - Reader Script:
-  """${currentReaderScript}"""
-
-  CURRENT DOCUMENT:
-  """${editorContent}"""`;
-
-  const conversation = messages.map(m => ({
-    role: m.role === 'user' ? 'user' : 'model',
-    parts: [{ text: m.content }]
-  }));
-
   try {
-    const stream = await ai.models.generateContentStream({
-      model: model,
-      contents: conversation as any,
-      config: {
-        systemInstruction: systemInstruction,
-        tools: [{ googleSearch: {} }], 
-        thinkingConfig: { thinkingBudget: 16000 }
+    const response = await fetch('/api/copilot', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
       },
+      body: JSON.stringify({
+        messages,
+        editorContent,
+        dbSchema,
+        currentVariables,
+        currentWriterScript,
+        currentReaderScript
+      }),
     });
 
-    return stream;
+    if (!response.ok) {
+      throw new Error(`API call failed: ${response.statusText}`);
+    }
+
+    if (!response.body) {
+      throw new Error("No response body");
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+
+    // Create a generator that yields text chunks primarily to match the expected interface if possible, 
+    // or return a stream object that mimics what the UI expects.
+    // The previous implementation returned a stream object from GoogleGenAI.
+    // We need to return an object with a `stream` property that is an async iterable.
+
+    const streamGenerator = async function* () {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunkText = decoder.decode(value, { stream: true });
+        // The original GoogleGenAI stream chunk has a specific structure: { text: () => string }
+        yield { text: () => chunkText };
+      }
+    };
+
+    return {
+      stream: streamGenerator()
+    };
+
   } catch (error) {
     console.error("thinkNotes API Error:", error);
     throw error;
