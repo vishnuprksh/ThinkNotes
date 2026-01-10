@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { marked } from 'marked';
 import ChatPanel from './components/ChatPanel';
@@ -61,6 +60,8 @@ const App: React.FC = () => {
   const [currentTheme, setCurrentTheme] = useState<AppTheme>(THEMES[0]);
   const [isTemplateMenuOpen, setIsTemplateMenuOpen] = useState(false);
   const [isTemplateLoading, setIsTemplateLoading] = useState(false);
+  const [isAdvancedMode, setIsAdvancedMode] = useState(false);
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
 
   // Database State
   const [db, setDb] = useState<any>(null);
@@ -83,6 +84,22 @@ const App: React.FC = () => {
 
   const isEmpty = useMemo(() => content.trim() === '', [content]);
   const templateMenuRef = useRef<HTMLDivElement>(null);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Close menus on click outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (templateMenuRef.current && !templateMenuRef.current.contains(event.target as Node)) {
+        setIsTemplateMenuOpen(false);
+      }
+      if (exportMenuRef.current && !exportMenuRef.current.contains(event.target as Node)) {
+        setIsExportMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Initialize DB on mount
   useEffect(() => {
@@ -123,7 +140,6 @@ const App: React.FC = () => {
     } catch (e: any) { setDbState(prev => ({ ...prev, error: e.message })); }
   }, []);
 
-  // Fix: Added the missing executeSql function to allow manual SQL execution and UI state refresh
   const executeSql = useCallback((sql: string) => {
     if (!db) return { error: "Database not initialized" };
     try {
@@ -144,7 +160,6 @@ const App: React.FC = () => {
     } catch (e: any) { return { error: e.message }; }
   }, []);
 
-  // Atomic state recording
   const recordGlobalState = useCallback((description: string, overrides: Partial<GlobalState> = {}) => {
     const next: GlobalState = {
       content: overrides.content !== undefined ? overrides.content : content,
@@ -156,8 +171,6 @@ const App: React.FC = () => {
     };
 
     setHistory(prev => [...prev, next]);
-    // The next item will be pushed to the end, so its index in the updated array 
-    // will be the current length of the array.
     return history.length;
   }, [content, writerScript, readerScript, variables, history.length]);
 
@@ -197,23 +210,17 @@ const App: React.FC = () => {
     if (index < 0 || index >= history.length) return;
     const checkpoint = history[index];
 
-    // 1. Update primary editor and script states
     setContent(checkpoint.content);
     setWriterScript(checkpoint.writerScript);
     setReaderScript(checkpoint.readerScript);
     setVariables(checkpoint.variables);
 
-    // 2. Truncate history to the point we are restoring to
     setHistory(prev => prev.slice(0, index + 1));
 
-    // 3. Remove all messages that occurred after this checkpoint
     setMessages(prev => {
       const filtered = prev.filter(m => {
-        // Keep system messages or messages with index <= current restore index
         if (m.role === 'system') return true;
         if (m.checkpointIndex !== undefined && m.checkpointIndex > index) return false;
-        // Basic heuristic: if it doesn't have an index, it might be a user message 
-        // leading to a future checkpoint. Filter by timestamp relative to checkpoint.
         return m.timestamp <= checkpoint.timestamp;
       });
       return [...filtered, {
@@ -224,7 +231,6 @@ const App: React.FC = () => {
       }];
     });
 
-    // 4. Trigger a system-wide re-sync to ensure the Database matches the restored scripts
     if (db) {
       setDbState(prev => ({ ...prev, isSyncing: true }));
       try {
@@ -244,58 +250,166 @@ const App: React.FC = () => {
     setViewMode('preview');
   }, [history, db, fetchExternalData, refreshDbState]);
 
+  const clearDatabase = useCallback((targetDb: any) => {
+    if (!targetDb) return;
+    try {
+      const res = targetDb.exec("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';");
+      if (res.length > 0) {
+        res[0].values.forEach((row: any) => {
+          targetDb.run(`DROP TABLE IF EXISTS "${row[0]}";`);
+        });
+      }
+      refreshDbState(targetDb);
+    } catch (e) {
+      console.error("Failed to clear database:", e);
+    }
+  }, [refreshDbState]);
+
   const applyTemplate = async (templateId: string) => {
     setIsTemplateMenuOpen(false);
     if (!db) return;
 
     if (templateId === 'blank') {
+      clearDatabase(db);
       setContent('');
       setVariables({});
+      setMessages([]); // Clear chat for fresh start
       setWriterScript(DEFAULT_WRITER);
       setReaderScript(DEFAULT_READER);
       setShowWelcome(false);
       setViewMode('edit');
       recordGlobalState('Start Blank Note', { content: '', variables: {}, writerScript: DEFAULT_WRITER, readerScript: DEFAULT_READER });
+
+      // Trigger sync for blank note to reset DB
+      await handleSync({ writer: DEFAULT_WRITER, reader: DEFAULT_READER });
       return;
     }
 
     setIsTemplateLoading(true);
     setShowWelcome(false);
     setViewMode('preview');
+    setMessages([]); // Clear chat for new template context
+    clearDatabase(db);
 
     try {
       if (templateId === 'fpl_analysis') {
         const fWriter = `async ({ db, fetchExternalData }) => {
-  const res = await fetchExternalData('https://api.codetabs.com/v1/proxy/?quest=' + encodeURIComponent('https://fantasy.premierleague.com/api/bootstrap-static/'));
+  const proxy = 'https://api.codetabs.com/v1/proxy/?quest=';
+  const bootstrapRes = await fetchExternalData(proxy + encodeURIComponent('https://fantasy.premierleague.com/api/bootstrap-static/'));
+  const fixturesRes = await fetchExternalData(proxy + encodeURIComponent('https://fantasy.premierleague.com/api/fixtures/'));
   
-  if (!res.data || !Array.isArray(res.data.teams)) {
-    throw new Error("FPL API Failed: " + (res.error || "Invalid Response"));
+  if (!bootstrapRes.data || !fixturesRes.data) {
+    throw new Error("FPL API Failed: " + (bootstrapRes.error || fixturesRes.error || "Invalid Response"));
   }
 
-  const fplData = res.data;
-  
+  const { teams, elements, events } = bootstrapRes.data;
+  const fixtures = fixturesRes.data;
+  const currentGw = events.find(e => e.is_current)?.id || 1;
+
+  // Setup Tables
   db.run("DROP TABLE IF EXISTS fpl_teams;");
-  db.run("CREATE TABLE fpl_teams (name TEXT, points INTEGER, strength INTEGER);");
-  fplData.teams.forEach(t => {
-    const score = (t.strength || 1) * 12 + Math.floor(Math.random() * 15);
-    db.run("INSERT INTO fpl_teams VALUES (?, ?, ?);", [t.name, score, t.strength]);
+  db.run("CREATE TABLE fpl_teams (id INTEGER PRIMARY KEY, name TEXT, short_name TEXT, strength INTEGER);");
+  teams.forEach(t => db.run("INSERT INTO fpl_teams VALUES (?, ?, ?, ?);", [t.id, t.name, t.short_name, t.strength]));
+
+  db.run("DROP TABLE IF EXISTS fpl_players;");
+  db.run("CREATE TABLE fpl_players (id INTEGER, name TEXT, team_id INTEGER, pos TEXT, cost REAL, points INTEGER, ppg REAL, form REAL, selected TEXT);");
+  const posMap = { 1: 'GKP', 2: 'DEF', 3: 'MID', 4: 'FWD' };
+  elements.forEach(e => {
+    db.run("INSERT INTO fpl_players VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);", 
+      [e.id, e.web_name, e.team, posMap[e.element_type], e.now_cost/10, e.total_points, parseFloat(e.points_per_game), parseFloat(e.form), e.selected_by_percent]
+    );
   });
-  return "FPL Data Hydrated (Live)";
+
+  db.run("DROP TABLE IF EXISTS fpl_fixtures;");
+  db.run("CREATE TABLE fpl_fixtures (event INTEGER, home_team INTEGER, away_team INTEGER, home_diff INTEGER, away_diff INTEGER);");
+  fixtures.filter(f => f.event !== null).forEach(f => {
+    db.run("INSERT INTO fpl_fixtures VALUES (?, ?, ?, ?, ?);", [f.event, f.team_h, f.team_a, f.team_h_difficulty, f.team_a_difficulty]);
+  });
+
+  db.run("DROP TABLE IF EXISTS fpl_meta;");
+  db.run("CREATE TABLE fpl_meta (key TEXT, value INTEGER);");
+  db.run("INSERT INTO fpl_meta VALUES (?, ?);", ['current_gw', currentGw]);
+
+  return "FPL Data Fully Hydrated (Players, Teams, Fixtures)";
 }`;
         const fReader = `async ({ db }) => {
-  const avg = db.exec("SELECT ROUND(AVG(points), 1) FROM fpl_teams;")[0].values[0][0];
-  const table = db.exec("SELECT name as Team, points as Score FROM fpl_teams ORDER BY points DESC LIMIT 5;")[0];
+  const currentGwRes = db.exec("SELECT value FROM fpl_meta WHERE key='current_gw'");
+  const currentGw = currentGwRes.length > 0 ? currentGwRes[0].values[0][0] : 1;
+
+  // Analytical queries
+  const topPlayers = db.exec(\`
+    SELECT p.name, t.short_name as Team, p.pos as Pos, p.points as Pts, p.ppg as PPG, p.form as Form 
+    FROM fpl_players p 
+    JOIN fpl_teams t ON p.team_id = t.id 
+    WHERE p.ppg > 0 
+    ORDER BY p.form DESC, p.ppg DESC LIMIT 8;
+  \`)[0];
+
+  const difficulty = db.exec(\`
+    SELECT t.name as Team, 
+           ROUND(AVG(CASE WHEN f.home_team = t.id THEN f.home_diff ELSE f.away_diff END), 2) as "Avg FDR",
+           GROUP_CONCAT(
+             (CASE WHEN f.home_team = t.id THEN t_away.short_name || '(H)' ELSE t_home.short_name || '(A)' END),
+             ' → '
+           ) as Fixtures
+    FROM fpl_teams t
+    JOIN fpl_fixtures f ON f.home_team = t.id OR f.away_team = t.id
+    JOIN fpl_teams t_home ON f.home_team = t_home.id
+    JOIN fpl_teams t_away ON f.away_team = t_away.id
+    WHERE f.event BETWEEN \${currentGw} AND \${currentGw + 2}
+    GROUP BY t.id
+    ORDER BY "Avg FDR" ASC LIMIT 10;
+  \`)[0];
+
+  // Logic for a "Best 11" recommendation
+  const best11 = db.exec(\`
+    WITH RankedPlayers AS (
+      SELECT p.name, p.pos, p.points, p.ppg, p.form, p.cost, t.short_name,
+             ROW_NUMBER() OVER(PARTITION BY p.pos ORDER BY (p.form * 0.6 + p.ppg * 0.4) DESC) as rank
+      FROM fpl_players p
+      JOIN fpl_teams t ON p.team_id = t.id
+      WHERE p.ppg > 2.0
+    )
+    SELECT name as Player, pos as Pos, short_name as Team, cost as "£m", points as Pts, form as Form, ppg as PPG FROM RankedPlayers
+    WHERE (pos = 'GKP' AND rank = 1)
+       OR (pos = 'DEF' AND rank <= 4)
+       OR (pos = 'MID' AND rank <= 4)
+       OR (pos = 'FWD' AND rank <= 2)
+    ORDER BY CASE WHEN pos='GKP' THEN 1 WHEN pos='DEF' THEN 2 WHEN pos='MID' THEN 3 ELSE 4 END;
+  \`)[0];
+
   return {
-    avg_score: String(avg),
-    top_teams: { columns: table.columns, values: table.values }
+    current_gw: String(currentGw),
+    top_players_table: { columns: topPlayers.columns, values: topPlayers.values },
+    fixture_difficulty: { columns: difficulty.columns, values: difficulty.values },
+    best_11_table: { columns: best11.columns, values: best11.values }
   };
 }`;
         await handleSync({ writer: fWriter, reader: fReader });
-        const newContent = `# FPL Performance Report\nThe league average score is **{{avg_score}}**.\n\n### Top Clubs\n{{top_teams}}`;
+        const newContent = `# 🏆 FPL Expert Analysis (GW {{current_gw}})
+
+## 🌟 Recommended Best 11
+Selected based on current **Form** (60%) and **PPG** (40%).
+
+{{best_11_table}}
+
+---
+
+## 🔥 In-Form Players
+Highest performing players across all teams.
+
+{{top_players_table}}
+
+---
+
+## 📅 Softest Fixtures (Next 3 GWs)
+Teams with the lowest average Fixture Difficulty Rating (FDR).
+
+{{fixture_difficulty}}`;
         setContent(newContent);
         setWriterScript(fWriter);
         setReaderScript(fReader);
-        recordGlobalState('Applied FPL Template', { content: newContent, writerScript: fWriter, readerScript: fReader });
+        recordGlobalState('Applied Improved FPL Template', { content: newContent, writerScript: fWriter, readerScript: fReader });
       }
 
       if (templateId === 'student_intelligence') {
@@ -373,7 +487,6 @@ const App: React.FC = () => {
 
   const handleUpdateDocument = useCallback((newContent: string, reason: string) => {
     setContent(newContent); setShowWelcome(false); setViewMode('preview');
-    // Note: We don't record state here anymore, the ChatPanel will record once after all updates
   }, []);
 
   const contentDiff = useMemo(() => {
@@ -404,13 +517,80 @@ const App: React.FC = () => {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    setIsExportMenuOpen(false);
   }, [processedContent]);
+
+  const handleExportFull = useCallback(() => {
+    const data = {
+      version: '1.0',
+      content,
+      writerScript,
+      readerScript,
+      timestamp: Date.now()
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `template-${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    setIsExportMenuOpen(false);
+  }, [content, writerScript, readerScript]);
+
+  const handleImportFull = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const json = JSON.parse(event.target?.result as string);
+        if (json.content !== undefined && json.writerScript && json.readerScript) {
+          clearDatabase(db);
+          setContent(json.content);
+          setWriterScript(json.writerScript);
+          setReaderScript(json.readerScript);
+          setShowWelcome(false);
+          setViewMode('preview');
+          setIsTemplateLoading(true);
+
+          // Force a sync to hydrate DB with new scripts
+          try {
+            await handleSync({ writer: json.writerScript, reader: json.readerScript });
+          } catch (syncErr: any) {
+            setMessages(prev => [...prev, { id: Date.now().toString(), role: 'system', content: '❌ Import Sync Error: ' + syncErr.message, timestamp: Date.now() }]);
+          } finally {
+            setIsTemplateLoading(false);
+          }
+
+          setMessages([]); // Clear chat for imported template
+          recordGlobalState('Imported Full Template');
+        } else {
+          throw new Error("Invalid template format");
+        }
+      } catch (err: any) {
+        setMessages(prev => [...prev, { id: Date.now().toString(), role: 'system', content: '❌ Import Error: ' + err.message, timestamp: Date.now() }]);
+      }
+    };
+    reader.readAsText(file);
+    setIsExportMenuOpen(false);
+    // Reset file input
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }, [handleSync, recordGlobalState]);
+
+  const handleExportPdf = useCallback(() => {
+    setIsExportMenuOpen(false);
+    window.print();
+  }, []);
 
   return (
     <div className={`flex h-screen w-full text-theme-main overflow-hidden`} style={{ backgroundColor: 'var(--bg-primary)' }}>
       <div id="main-view" className={`flex flex-col flex-1 min-w-0 transition-all duration-300 relative`}>
         <header className="h-14 border-b flex items-center justify-between px-3 sm:px-4 z-20 shrink-0" style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border-primary)' }}>
-          <div className="flex items-center gap-2 sm:gap-4 overflow-hidden">
+          <div className="flex items-center gap-2 sm:gap-4">
             <div className="flex items-center gap-2.5 shrink-0">
               <div className="w-8 h-8 border rounded-lg flex items-center justify-center shadow-lg shrink-0" style={{ backgroundColor: 'var(--bg-primary)', borderColor: 'var(--border-primary)' }}>
                 <svg className="w-5 h-5 text-indigo-500" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
@@ -445,6 +625,10 @@ const App: React.FC = () => {
                   const active = viewMode === val;
                   if (val === 'api_diff' && history.length < 2) return null;
                   if (val === 'edit_diff' && history.length < 2) return null;
+
+                  const advancedTabs = ['edit_diff', 'db', 'api', 'api_diff'];
+                  if (!isAdvancedMode && advancedTabs.includes(val)) return null;
+
                   return (
                     <button key={m} onClick={() => setViewMode(val)} className={`px-2.5 py-1 rounded-md text-[10px] sm:text-xs font-medium shrink-0 ${active ? 'text-white' : ''}`}
                       style={{ backgroundColor: active ? 'var(--border-primary)' : 'transparent', color: active ? '#ffffff' : 'var(--text-secondary)' }}
@@ -456,9 +640,55 @@ const App: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-1 sm:gap-3 ml-2">
-            <button onClick={handleExport} title="Export processed Markdown" className="hidden xs:flex p-1.5 sm:p-2 rounded-lg border hover:bg-white/5 transition-colors" style={{ borderColor: 'var(--border-primary)', backgroundColor: 'var(--bg-primary)' }}>
-              <svg className="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1M7 10l5 5m0 0l5-5m-5 5V3" /></svg>
+            <button
+              onClick={() => setIsAdvancedMode(!isAdvancedMode)}
+              title={isAdvancedMode ? "Disable Advanced Mode" : "Enable Advanced Mode"}
+              className={`p-1.5 sm:p-2 rounded-lg border transition-all ${isAdvancedMode ? 'bg-indigo-900/20 border-indigo-500/50' : 'hover:bg-white/5'}`}
+              style={{
+                borderColor: isAdvancedMode ? 'var(--accent-primary)' : 'var(--border-primary)',
+                backgroundColor: isAdvancedMode ? 'transparent' : 'var(--bg-primary)',
+                color: isAdvancedMode ? 'var(--accent-primary)' : 'var(--text-secondary)'
+              }}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
             </button>
+            <div className="relative" ref={exportMenuRef}>
+              <button
+                onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
+                title="Export Document"
+                className={`p-1.5 sm:p-2 rounded-lg border transition-all ${isExportMenuOpen ? 'bg-indigo-900/20 border-indigo-500/50' : 'hover:bg-white/5'}`}
+                style={{ borderColor: 'var(--border-primary)', backgroundColor: 'var(--bg-primary)' }}
+              >
+                <svg className="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1M7 10l5 5m0 0l5-5m-5 5V3" /></svg>
+              </button>
+              {isExportMenuOpen && (
+                <div className="absolute right-0 mt-2 w-48 rounded-xl border shadow-2xl z-50 overflow-hidden no-print" style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border-primary)', backdropFilter: 'blur(8px)' }}>
+                  <button onClick={handleExport} className="w-full text-left p-3 hover:bg-white/5 border-b flex items-center gap-3 transition-colors" style={{ borderColor: 'var(--border-primary)' }}>
+                    <svg className="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                    <span className="text-xs font-bold text-white">Markdown (.md)</span>
+                  </button>
+                  <button onClick={handleExportFull} className="w-full text-left p-3 hover:bg-white/5 border-b flex items-center gap-3 transition-colors" style={{ borderColor: 'var(--border-primary)' }}>
+                    <svg className="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>
+                    <span className="text-xs font-bold text-white">Export Full (.json)</span>
+                  </button>
+                  <button onClick={() => fileInputRef.current?.click()} className="w-full text-left p-3 hover:bg-white/5 border-b flex items-center gap-3 transition-colors" style={{ borderColor: 'var(--border-primary)' }}>
+                    <svg className="w-4 h-4 text-fuchsia-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1M7 10l5-5m0 0l5 5m-5-5v12" /></svg>
+                    <span className="text-xs font-bold text-white">Import Full (.json)</span>
+                  </button>
+                  <button onClick={handleExportPdf} className="w-full text-left p-3 hover:bg-white/5 flex items-center gap-3 transition-colors">
+                    <svg className="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
+                    <span className="text-xs font-bold text-white">PDF (via Print)</span>
+                  </button>
+                </div>
+              )}
+            </div>
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleImportFull}
+              accept=".json"
+              className="hidden"
+            />
             <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className={`p-1.5 sm:p-2 rounded-lg transition-all ${isSidebarOpen ? 'bg-indigo-900/20' : 'hover:bg-white/5'}`} style={{ color: isSidebarOpen ? 'var(--accent-primary)' : 'var(--text-secondary)' }}>
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg>
             </button>
@@ -616,7 +846,6 @@ const App: React.FC = () => {
         </main>
       </div>
 
-      {/* Responsive Sidebar (Drawer on mobile) */}
       <div
         className={`fixed inset-0 z-40 lg:hidden transition-opacity duration-300 ${isSidebarOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
         onClick={() => setIsSidebarOpen(false)}

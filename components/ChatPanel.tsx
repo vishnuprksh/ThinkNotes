@@ -200,6 +200,18 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
           </h2>
         </div>
         <div className="flex items-center gap-1.5">
+          <button
+            onClick={async () => {
+              setMessages([]);
+              await handleSync();
+            }}
+            title="Start New Chat"
+            className="p-1 px-2 rounded border text-[9px] font-bold uppercase tracking-wider transition-all hover:bg-white/5 active:scale-95 flex items-center gap-1.5"
+            style={{ color: 'var(--text-secondary)', borderColor: 'var(--border-primary)' }}
+          >
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+            New Chat
+          </button>
           <span className="text-[8px] bg-indigo-500/10 text-indigo-400 px-1.5 py-0.5 rounded border border-indigo-500/20 font-bold uppercase tracking-wider hidden xs:inline-block">Checkpoint Mode</span>
         </div>
       </div>
