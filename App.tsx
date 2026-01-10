@@ -266,15 +266,37 @@ const App: React.FC = () => {
     try {
       if (templateId === 'fpl_analysis') {
         const fWriter = `async ({ db, fetchExternalData }) => {
-  const res = await fetchExternalData('https://fantasy.premierleague.com/api/bootstrap-static/');
-  if (!res.data) throw new Error("FPL API Failed");
+  let fplData;
+  try {
+    const res = await fetchExternalData('https://api.codetabs.com/v1/proxy/?quest=' + encodeURIComponent('https://fantasy.premierleague.com/api/bootstrap-static/'));
+    if (res.data && Array.isArray(res.data.teams)) {
+      fplData = res.data;
+    } else {
+      throw new Error("Invalid API Response");
+    }
+  } catch (e) {
+    console.warn("FPL API Failed, using mock data:", e.message);
+    fplData = {
+      teams: [
+        { name: "Arsenal", strength: 5 },
+        { name: "Man City", strength: 5 },
+        { name: "Liverpool", strength: 5 },
+        { name: "Chelsea", strength: 4 },
+        { name: "Aston Villa", strength: 4 },
+        { name: "Tottenham", strength: 4 },
+        { name: "Man Utd", strength: 4 },
+        { name: "Newcastle", strength: 4 }
+      ]
+    };
+  }
+  
   db.run("DROP TABLE IF EXISTS fpl_teams;");
   db.run("CREATE TABLE fpl_teams (name TEXT, points INTEGER, strength INTEGER);");
-  res.data.teams.forEach(t => {
+  fplData.teams.forEach(t => {
     const score = (t.strength || 1) * 12 + Math.floor(Math.random() * 15);
     db.run("INSERT INTO fpl_teams VALUES (?, ?, ?);", [t.name, score, t.strength]);
   });
-  return "FPL Data Hydrated";
+  return fplData.teams.length > 10 ? "FPL Data Hydrated (Live)" : "FPL Data Hydrated (Mock)";
 }`;
         const fReader = `async ({ db }) => {
   const avg = db.exec("SELECT ROUND(AVG(points), 1) FROM fpl_teams;")[0].values[0][0];
