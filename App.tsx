@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { marked } from 'marked';
+import Handlebars from 'handlebars';
 import ChatPanel from './components/ChatPanel';
 import { Message, GlobalState, ViewMode, DatabaseState, TableInfo, Template, TableData } from './types';
 import initSqlJs from "sql.js";
@@ -470,22 +471,38 @@ Teams with the lowest average Fixture Difficulty Rating (FDR).
   };
 
   const processedContent = useMemo(() => {
-    let result = content;
-    Object.entries(variables).forEach(([key, value]) => {
-      const regex = new RegExp(`{{${key}}}`, 'g');
-      if (typeof value === 'string') {
-        result = result.replace(regex, value);
-      } else {
-        const table = value as TableData;
-        const mdTable = [
-          `| ${table.columns.join(' | ')} |`,
-          `| ${table.columns.map(() => '---').join(' | ')} |`,
-          ...table.values.map(row => `| ${row.map(cell => String(cell)).join(' | ')} |`)
-        ].join('\n');
-        result = result.replace(regex, mdTable);
-      }
-    });
-    return result;
+    try {
+      // Fix Handlebars array access: {{arr[0]}} -> {{arr.0}}
+      const sanitizedContent = content.replace(/{{(.*?)}}/g, (match, p1) => {
+        const fixedInner = p1.replace(/\[(\d+)\]/g, '.$1');
+        return `{{${fixedInner}}}`;
+      });
+      const template = Handlebars.compile(sanitizedContent);
+      // Pre-process variables to handle both direct object rendering (toString) and property access
+      const context = { ...variables };
+      Object.keys(context).forEach(key => {
+        const val = context[key];
+        if (typeof val === 'object' && val !== null && 'columns' in val && 'values' in val) {
+          const table = val as TableData;
+          // Create a proxy or modify the object to render as markdown when stringified
+          // while preserving property access for {{#each table.values}}
+          context[key] = {
+            ...table,
+            toString: () => {
+              return [
+                `| ${table.columns.join(' | ')} |`,
+                `| ${table.columns.map(() => '---').join(' | ')} |`,
+                ...table.values.map(row => `| ${row.map(cell => String(cell)).join(' | ')} |`)
+              ].join('\n');
+            }
+          };
+        }
+      });
+      return template(context);
+    } catch (e) {
+      console.error("Handlebars Rendering Error:", e);
+      return content;
+    }
   }, [content, variables]);
 
   const dbSchemaString = useMemo(() => {

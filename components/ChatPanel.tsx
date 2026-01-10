@@ -24,11 +24,11 @@ interface ChatPanelProps {
 }
 
 const STAGES = [
-  "Analyzing Document Structure",
-  "Checking Database Schema",
-  "Researching Context",
-  "Optimizing Pipelines",
-  "Applying Transformations"
+  "Analyzing Document",
+  "Checking Context",
+  "Researching",
+  "Synthesizing Information",
+  "Applying Updates"
 ];
 
 const ChatPanel: React.FC<ChatPanelProps> = ({
@@ -116,7 +116,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
         pendingWriter = writerMatch[1].trim().replace(/^```(javascript|js)?\s*/, '').replace(/```\s*$/, '');
         setWriterScript(pendingWriter);
         pipelineUpdated = true;
-        setMessages(prev => [...prev, { id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, role: 'system', content: `⚙️ Assistant: Hydrating Data...`, timestamp: Date.now() }]);
+        setMessages(prev => [...prev, { id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, role: 'system', content: `⚙️ Assistant: Absorbing Information...`, timestamp: Date.now() }]);
       }
 
       const readerPattern = /\[\[UPDATE_READER\]\]([\s\S]*?)\[\[\/UPDATE_READER\]\]/gi;
@@ -125,7 +125,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
         pendingReader = readerMatch[1].trim().replace(/^```(javascript|js)?\s*/, '').replace(/```\s*$/, '');
         setReaderScript(pendingReader);
         pipelineUpdated = true;
-        setMessages(prev => [...prev, { id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, role: 'system', content: `🔍 Assistant: Mapping Variables...`, timestamp: Date.now() }]);
+        setMessages(prev => [...prev, { id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, role: 'system', content: `🔍 Assistant: Organizing Knowledge...`, timestamp: Date.now() }]);
       }
 
       let finalVariables = variables;
@@ -145,9 +145,36 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
       let reason = "Assistant Response";
       let finalContent = editorContent;
 
+      // Helper to strip technical jargon
+      const filterJargon = (text: string) => {
+        const forbiddenPatterns = [
+          /db\.run/i, /db\.exec/i, /INSERT INTO/i, /CREATE TABLE/i, /SELECT .* FROM/i,
+          /sqlite/i, /Foreign Key/i, /Internal Writer/i, /Internal Reader/i,
+          /database schema/i, /primary key/i,
+          // Aggressive filtering for AI workflow artifacts
+          /^#{3,4}\s+\d+\.\s+.*$/i, // ### 1. DRAFTING, ### 2. MEMORY AUDIT
+          /^#{3,4}\s+Updating\s+(READER|WRITER).*$/i,
+          /PIPELINE SYNTHESIS/i, /DATA AUDIT/i, /FINAL TRANSFORMATION/i,
+          /The WRITER remains unchanged/i,
+          /I will query '.*' for/i
+        ];
+        return text.split('\n')
+          .filter(line => !forbiddenPatterns.some(p => p.test(line)))
+          .join('\n')
+          .replace(/\n{3,}/g, '\n\n') // Collapse excessive newlines left by filtering
+          .trim();
+      };
+
       if (updateMatch) {
         reason = updateMatch[1].trim() || "Assistant Refinement";
-        finalContent = updateMatch[2].trim();
+        // CRITICAL: Strip markdown code blocks if the AI wrapped the content in them
+        let rawContent = updateMatch[2].trim()
+          .replace(/^```[a-z]*\s*/i, '') // Remove leading ```markdown
+          .replace(/```\s*$/, '');        // Remove trailing ```
+
+        // Filter jargon from the document content as well
+        finalContent = filterJargon(rawContent);
+
         onUpdateDocument(finalContent, reason);
         isEdit = true;
         cleanedChat = cleanedChat.replace(updatePattern, '').trim();
@@ -166,7 +193,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
       const assistantMessage: Message = {
         id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         role: 'assistant',
-        content: cleanedChat || "Assistant task completed.",
+        content: filterJargon(cleanedChat) || "I've updated your workspace with the requested changes.",
         thought: fullThought,
         timestamp: Date.now(),
         groundingUrls,
