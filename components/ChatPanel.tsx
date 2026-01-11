@@ -81,6 +81,26 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
     setStreamingContent('');
     setCurrentStageIndex(0);
 
+    // Helper to strip technical jargon
+    const filterJargon = (text: string) => {
+      const forbiddenPatterns = [
+        /db\.run/i, /db\.exec/i, /INSERT INTO/i, /CREATE TABLE/i, /SELECT .* FROM/i,
+        /sqlite/i, /Foreign Key/i, /Internal Writer/i, /Internal Reader/i,
+        /database schema/i, /primary key/i,
+        // Aggressive filtering for AI workflow artifacts
+        /^#{3,4}\s+\d+\.\s+.*$/i, // ### 1. DRAFTING, ### 2. MEMORY AUDIT
+        /^#{3,4}\s+Updating\s+(READER|WRITER).*$/i,
+        /PIPELINE SYNTHESIS/i, /DATA AUDIT/i, /FINAL TRANSFORMATION/i,
+        /The WRITER remains unchanged/i,
+        /I will query '.*' for/i
+      ];
+      return text.split('\n')
+        .filter(line => !forbiddenPatterns.some(p => p.test(line)))
+        .join('\n')
+        .replace(/\n{3,}/g, '\n\n') // Collapse excessive newlines left by filtering
+        .trim();
+    };
+
     try {
       const currentVarsString = Object.entries(variables)
         .map(([k, v]) => `${k}: ${typeof v === 'string' ? v : '[Table]'}`)
@@ -145,26 +165,6 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
       let reason = "Assistant Response";
       let finalContent = editorContent;
 
-      // Helper to strip technical jargon
-      const filterJargon = (text: string) => {
-        const forbiddenPatterns = [
-          /db\.run/i, /db\.exec/i, /INSERT INTO/i, /CREATE TABLE/i, /SELECT .* FROM/i,
-          /sqlite/i, /Foreign Key/i, /Internal Writer/i, /Internal Reader/i,
-          /database schema/i, /primary key/i,
-          // Aggressive filtering for AI workflow artifacts
-          /^#{3,4}\s+\d+\.\s+.*$/i, // ### 1. DRAFTING, ### 2. MEMORY AUDIT
-          /^#{3,4}\s+Updating\s+(READER|WRITER).*$/i,
-          /PIPELINE SYNTHESIS/i, /DATA AUDIT/i, /FINAL TRANSFORMATION/i,
-          /The WRITER remains unchanged/i,
-          /I will query '.*' for/i
-        ];
-        return text.split('\n')
-          .filter(line => !forbiddenPatterns.some(p => p.test(line)))
-          .join('\n')
-          .replace(/\n{3,}/g, '\n\n') // Collapse excessive newlines left by filtering
-          .trim();
-      };
-
       if (updateMatch) {
         reason = updateMatch[1].trim() || "Assistant Refinement";
         // CRITICAL: Strip markdown code blocks if the AI wrapped the content in them
@@ -202,14 +202,15 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
         checkpointIndex: checkpointIndex
       };
       setMessages(prev => [...prev, assistantMessage]);
-    } catch (error) {
-      console.error(error);
-      setMessages(prev => [...prev, { id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, role: 'assistant', content: "Assistant encountered an internal error.", timestamp: Date.now() }]);
-    } finally {
-      setIsLoading(false);
-      setStreamingThought('');
-      setStreamingContent('');
+
+    } catch (error: any) {
+      console.error(`API Request failed:`, error);
+      setMessages(prev => [...prev, { id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, role: 'assistant', content: `Assistant encountered an internal error: ${error.message}`, timestamp: Date.now() }]);
     }
+
+    setIsLoading(false);
+    setStreamingThought('');
+    setStreamingContent('');
   };
 
   return (

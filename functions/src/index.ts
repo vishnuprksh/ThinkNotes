@@ -37,9 +37,6 @@ export const getCopilotResponse = onRequest({
   const lastMessage = validMessages[validMessages.length - 1];
   const prompt = lastMessage ? lastMessage.content : "";
 
-  const searchKeywords = ["search", "find", "look up", "latest", "news", "current", "who is", "what is"];
-  const isSearchIntent = searchKeywords.some(kw => prompt.toLowerCase().includes(kw));
-
   const systemInstruction = `You are thinkNotes Assistant, a powerful workspace companion. 
   You follow a strict AGENTIC WORKFLOW for document transformation and data management.
 
@@ -60,6 +57,27 @@ export const getCopilotResponse = onRequest({
   - db.exec(sql): Use for SELECT. Returns an array of result objects.
   
   CRITICAL: 'db.query' is NOT a function. Do not use it. Always use 'db.exec' for data retrieval.
+
+  STRICT DATA RULES:
+  - NEVER generate or use hardcoded mock data, fictional entries, or placeholders.
+  - When the user asks to use an API (e.g., FPL API), you MUST use 'fetchExternalData' within [[UPDATE_WRITER]] to acquire real-time data.
+  - Using mock data instead of a requested API is strictly prohibited.
+  - Explicitly mention in your natural language response that you are gathering real data from the API.
+  - IMPORTANT: When calling external APIs, use PROXY PATHS to avoid CORS errors:
+    * For FPL API (https://fantasy.premierleague.com/api/), use '/fpl/' prefix (e.g., '/fpl/bootstrap-static/' instead of 'https://fantasy.premierleague.com/api/bootstrap-static/')
+    * The frontend has a Vite proxy configured that routes '/fpl/*' requests to the FPL API
+    * Always use relative proxy paths (starting with '/') instead of absolute URLs when available
+  
+  CODE EXECUTION FOR API EXPLORATION:
+  - You have access to Code Execution (Python) to test and explore external APIs before generating Writer scripts.
+  - When the user mentions an external API, use Code Execution to:
+    1. Test the API endpoint (e.g., requests.get('https://fantasy.premierleague.com/api/bootstrap-static/'))
+    2. Inspect the response structure (print keys, sample data, data types)
+    3. Understand the schema to generate accurate database tables
+  - after exploring with Code Execution, generate the Writer script using the proxy path (e.g., '/fpl/bootstrap-static/')
+  - Example: Use Code Execution to see that FPL API returns {teams: [...], elements: [...], events: [...]}, then create tables for each
+  - You can also Inspect the keys of the fetched data dynamically in the Writer script (e.g. Object.keys(data)) to adapt the schema.
+  - IMPORTANT: 'fetchExternalData' returns an OBJECT. Do NOT use 'JSON.parse()' on the result. Access properties directly (res.data) or use await res.json().
 
   STRICT TRANSFORMATIONS:
   - The document is a Handlebars template. You MUST use Handlebars syntax ({{#each}}, {{if}}, {{variable}}) for dynamic content.
@@ -106,24 +124,95 @@ export const getCopilotResponse = onRequest({
   CURRENT DOCUMENT:
   """${editorContent}"""`;
 
-  let config: any;
+  // PHASE 1: Intelligent Routing Decision
+  // Make a fast API call to determine which tools are needed
+  logger.info("Phase 1: Routing decision for prompt:", prompt.substring(0, 100));
 
-  if (isSearchIntent) {
-    config = {
-      tools: [{ googleSearch: {} }],
-      systemInstruction: systemInstruction,
-      temperature: 0.2,
-    };
-  } else {
-    config = {
-      thinkingConfig: {
-        includeThoughts: true,
-      },
-      systemInstruction: systemInstruction,
-      temperature: 0.2,
-      responseMimeType: "text/plain",
+  const routingPrompt = `Analyze this user request and determine which tools are needed.
+
+User Request: "${prompt}"
+Current Context: ${editorContent ? 'User has a document with content' : 'Blank document'}
+Database State: ${dbSchema ? 'Has existing data/schema' : 'Empty database'}
+Conversation History: ${validMessages.length > 1 ? 'Multi-turn conversation' : 'First message'}
+
+Available Tools:
+- thinking: Deep reasoning for complex tasks, schema design, data transformations
+- codeExecution: Run Python code to test APIs, explore data structures, validate endpoints
+- googleSearch: Find current information, latest news, real-time data from the web
+- structuredOutput: Generate well-formatted JSON schemas (rarely needed for this app)
+
+Rules:
+- If user mentions an external API/endpoint, enable codeExecution to test it
+- If user asks about current events/news/latest info, enable googleSearch
+- For complex data transformations or schema design, enable thinking
+- Most requests need thinking by default
+- Multiple tools can be enabled simultaneously
+
+Respond with JSON only:
+{
+  "needsThinking": boolean,
+  "needsCodeExecution": boolean,
+  "needsGoogleSearch": boolean,
+  "reasoning": "brief explanation of tool selection"
+}`;
+
+  let toolDecision: any;
+  try {
+    const routingResponse = await ai.models.generateContent({
+      model: 'gemini-2.0-flash-exp',
+      contents: [{ role: 'user', parts: [{ text: routingPrompt }] }],
+      config: {
+        responseMimeType: 'application/json',
+        temperature: 0
+      }
+    });
+
+    const responseText = routingResponse.text || "{}";
+    toolDecision = JSON.parse(responseText);
+    logger.info("Routing decision:", toolDecision);
+  } catch (error) {
+    logger.error("Routing decision failed, using default config:", error);
+    // Fallback to safe defaults
+    toolDecision = {
+      needsThinking: true,
+      needsCodeExecution: false,
+      needsGoogleSearch: false,
+      reasoning: "Fallback due to routing error"
     };
   }
+
+  // PHASE 2: Build Dynamic Tool Configuration
+  const tools: any[] = [];
+  if (toolDecision.needsCodeExecution) {
+    tools.push({ codeExecution: {} });
+  }
+  if (toolDecision.needsGoogleSearch) {
+    tools.push({ googleSearch: {} });
+  }
+
+  const config: any = {
+    systemInstruction: systemInstruction,
+    temperature: 0.2,
+    responseMimeType: "text/plain",
+  };
+
+  // Add tools if any were selected
+  if (tools.length > 0) {
+    config.tools = tools;
+  }
+
+  // Add thinking config if needed
+  if (toolDecision.needsThinking) {
+    config.thinkingConfig = {
+      includeThoughts: true,
+    };
+  }
+
+  logger.info("Final config:", {
+    tools: tools.map(t => Object.keys(t)[0]),
+    hasThinking: !!config.thinkingConfig,
+    reasoning: toolDecision.reasoning
+  });
 
   try {
     const stream = await ai.models.generateContentStream({

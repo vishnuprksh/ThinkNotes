@@ -21,6 +21,7 @@ const THEMES: AppTheme[] = [
 
 const TEMPLATES: Template[] = [
   { id: 'fpl_analysis', name: 'FPL Analytics', description: 'Acquires data via external FPL API and reads key metrics.', icon: '🏆' },
+  { id: 'habit_tracker', name: 'Habit Tracker', description: 'Track your weekly habits and progress.', icon: '✅' },
   { id: 'student_intelligence', name: 'Student Records', description: 'Local database with grading logic and attendance tracking.', icon: '🎓' },
   { id: 'blank', name: 'Blank Note', description: 'Fresh start with no logic.', icon: '📝' }
 ];
@@ -156,10 +157,24 @@ const App: React.FC = () => {
 
   const fetchExternalData = useCallback(async (url: string, method: string = 'GET') => {
     try {
-      const response = await fetch(url, { method });
+      // Auto-proxy logic for FPL API to avoid CORS
+      let targetUrl = url;
+      if (url.includes('fantasy.premierleague.com/api/')) {
+        targetUrl = url.replace('https://fantasy.premierleague.com/api/', '/fpl/').replace('http://fantasy.premierleague.com/api/', '/fpl/');
+        console.log(`[Auto-Proxy] Redirecting ${url} to ${targetUrl}`);
+      }
+
+      const response = await fetch(targetUrl, { method });
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
       const data = await response.json();
-      return { data };
+      // Return hybrid object:
+      // 1. .data property (for existing templates expecting parsed JSON)
+      // 2. .json() method (for scripts expecting standard Response-like behavior)
+      return {
+        data,
+        json: async () => data,
+        toString: () => JSON.stringify(data)
+      };
     } catch (e: any) { return { error: e.message }; }
   }, []);
 
@@ -462,6 +477,92 @@ Teams with the lowest average Fixture Difficulty Rating (FDR).
         setWriterScript(sWriter);
         setReaderScript(sReader);
         recordGlobalState('Applied Student Template', { content: newContent, writerScript: sWriter, readerScript: sReader });
+      }
+
+      if (templateId === 'habit_tracker') {
+        const hWriter = `async ({ db, fetchExternalData }) => {
+  // 1. Drop and Recreate Table with new 'description' column
+  await db.run("DROP TABLE IF EXISTS habits;");
+  await db.run(\`
+    CREATE TABLE habits (
+      id INTEGER PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      target_count INTEGER NOT NULL,
+      current_count INTEGER NOT NULL,
+      is_completed BOOLEAN
+    );
+  \`);
+
+  // 2. Insert all data, including new habits and descriptions
+  const habitsToInsert = [
+    ["Meditate", "Practice mindfulness for 15 minutes.", 5, 3, 0],
+    ["Read 30 mins", "Read a non-fiction book for at least 30 minutes.", 7, 7, 1],
+    ["Exercise", "Complete a 45-minute workout session.", 3, 1, 0],
+    ["Journaling", "Write 500 words about the day's events.", 5, 0, 0], 
+    ["No Sugar", "Avoid all added sugars and processed sweets.", 7, 4, 0]
+  ];
+
+  for (const [name, description, target, current, completed] of habitsToInsert) {
+    await db.run(
+      "INSERT INTO habits (name, description, target_count, current_count, is_completed) VALUES (?, ?, ?, ?, ?)",
+      [name, description, target, current, completed]
+    );
+  }
+
+  return "Habit tracker updated with new schema and data.";
+}`;
+        const hReader = `async ({ db }) => {
+  const result = db.exec("SELECT name, description, target_count, current_count, is_completed FROM habits;");
+  
+  if (!result || result.length === 0) {
+    return {
+      habit_table_markdown: "| Habit | Description | Progress | Status |\\n|---|---|---|---|\\n| No habits defined. | - | - | - |",
+      overall_progress_percent: 0,
+      progress_bar_display: "[----------] 0%"
+    };
+  }
+
+  const habits = result[0].values.map(row => ({
+    name: row[0],
+    description: row[1],
+    target_count: row[2],
+    current_count: row[3],
+    is_completed: row[4]
+  }));
+
+  let total_habits = habits.length;
+  let completed_habits = habits.filter(h => h.current_count >= h.target_count).length;
+  let overall_progress_percent = total_habits > 0 ? Math.round((completed_habits / total_habits) * 100) : 0;
+
+  // Generate progress bar string (10 characters wide)
+  const bar_length = 10;
+  const filled_chars = Math.floor((overall_progress_percent / 100) * bar_length);
+  const empty_chars = bar_length - filled_chars;
+  const progress_bar_display = \`[\${'█'.repeat(filled_chars)}\${'—'.repeat(empty_chars)}] \${overall_progress_percent}%\`;
+
+  // Generate habit table markdown
+  let habit_table_markdown = "| Habit | Description | Progress | Status |\\n|---|---|---|---|\\n";
+  
+  habits.forEach(h => {
+    const is_complete = h.current_count >= h.target_count;
+    const status_icon = is_complete ? "✅ Completed" : "⏳ In Progress";
+    const progress_text = \`\${h.current_count}/\${h.target_count}\`;
+    habit_table_markdown += \`| **\${h.name}** | \${h.description} | \${progress_text} | \${status_icon} |\\n\`;
+  });
+
+  return {
+    habit_table_markdown,
+    overall_progress_percent,
+    progress_bar_display
+  };
+}`;
+        await handleSync({ writer: hWriter, reader: hReader });
+        const newContent = `# Weekly Habit Tracker\n\nWelcome to your personalized weekly habit tracker! This tool helps you visualize your consistency and maintain momentum toward your personal goals. Focus on the process, and the results will follow.\n\n## Overall Progress\nThis section tracks the percentage of your defined habits that have met their weekly target.\n\n**{{progress_bar_display}}**\n\n---\n\n## Habits Summary (Weekly Targets)\n\n{{habit_table_markdown}}\n\n---\n\n### How to Use:\nTo update your progress, simply tell me which habit you completed, and I will update your notes.\n\n*Example: "I finished reading 30 minutes today."*`;
+        setContent(newContent);
+        setWriterScript(hWriter);
+        setReaderScript(hReader);
+        recordGlobalState('Applied Habit Tracker Template', { content: newContent, writerScript: hWriter, readerScript: hReader });
       }
     } catch (e: any) {
       setMessages(prev => [...prev, { id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, role: 'system', content: '❌ Template Error: ' + e.message, timestamp: Date.now() }]);
