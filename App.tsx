@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { marked } from 'marked';
+
+import ReactMarkdown from 'react-markdown';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import remarkGfm from 'remark-gfm';
+import 'katex/dist/katex.min.css';
 import Handlebars from 'handlebars';
 import ChatPanel from './components/ChatPanel';
 import { Message, GlobalState, ViewMode, DatabaseState, TableInfo, Template, TableData } from './types';
 import initSqlJs from "sql.js";
 
-marked.setOptions({
-  gfm: true,
-  breaks: true,
-});
 
 Handlebars.registerHelper('add', (a, b) => Number(a) + Number(b));
 Handlebars.registerHelper('sub', (a, b) => Number(a) - Number(b));
@@ -28,6 +29,7 @@ const TEMPLATES: Template[] = [
   { id: 'fpl_analysis', name: 'FPL Analytics', description: 'Acquires data via external FPL API and reads key metrics.', icon: '🏆' },
   { id: 'habit_tracker', name: 'Habit Tracker', description: 'Track your weekly habits and progress.', icon: '✅' },
   { id: 'student_intelligence', name: 'Student Records', description: 'Local database with grading logic and attendance tracking.', icon: '🎓' },
+  { id: 'math_formulas', name: 'Math Formulas', description: 'Demonstrates LaTeX equation rendering.', icon: '∑' },
   { id: 'blank', name: 'Blank Note', description: 'Fresh start with no logic.', icon: '📝' }
 ];
 
@@ -455,6 +457,61 @@ Teams with the lowest average Fixture Difficulty Rating (FDR).
         recordGlobalState('Applied Improved FPL Template', { content: newContent, writerScript: fWriter, readerScript: fReader });
       }
 
+      if (templateId === 'math_formulas') {
+        const mWriter = `async ({ db }) => {
+  db.run("DROP TABLE IF EXISTS math_examples;");
+  db.run("CREATE TABLE math_examples (name TEXT, formulas TEXT, description TEXT);");
+  const data = [
+    ['Quadratic Formula', 'x = \\\\frac{-b \\\\pm \\\\sqrt{b^2 - 4ac}}{2a}', 'Solves ax^2 + bx + c = 0'],
+    ['Euler\\'s Identity', 'e^{i\\\\pi} + 1 = 0', 'Beautiful equation linking 5 constants'],
+    ['Pythagorean Theorem', 'a^2 + b^2 = c^2', 'Right-angled triangle relation']
+  ];
+  data.forEach(d => db.run("INSERT INTO math_examples VALUES (?, ?, ?);", d));
+  
+  db.run("DROP TABLE IF EXISTS circle_calc;");
+  db.run("CREATE TABLE circle_calc (radius REAL);");
+  db.run("INSERT INTO circle_calc VALUES (5);");
+
+  return "Math examples seeded.";
+}`;
+        const mReader = `async ({ db }) => {
+  const examples = db.exec("SELECT name, formulas, description FROM math_examples;")[0];
+  const radius = db.exec("SELECT radius FROM circle_calc;")[0].values[0][0];
+  const area = Math.PI * radius * radius;
+
+  // Manual markdown table construction for examples with LaTeX
+  let exampleTable = "| Name | Formula | Description |\\n|---|---|---|\\n";
+  examples.values.forEach(row => {
+    exampleTable += \`| \${row[0]} | $$\${row[1]}$$ | \${row[2]} |\\n\`;
+  });
+
+  return {
+    radius: String(radius),
+    area: String(area.toFixed(2)),
+    example_table: exampleTable
+  };
+}`;
+        await handleSync({ writer: mWriter, reader: mReader });
+        const newContent = `# Math & LaTeX Demo
+
+## Dynamic Calculation
+Calculated area of a circle with radius **{{radius}}**:
+$$ Area = \\pi r^2 = \\pi ({{radius}})^2 \\approx {{area}} $$
+
+## Famous Equations
+Here are some famous equations rendered from the database:
+
+{{example_table}}
+
+## Inline Math
+You can also write inline math like $E = mc^2$ or $\\int_0^\\infty e^{-x^2} dx = \\frac{\\sqrt{\\pi}}{2}$.
+`;
+        setContent(newContent);
+        setWriterScript(mWriter);
+        setReaderScript(mReader);
+        recordGlobalState('Applied Math Template', { content: newContent, writerScript: mWriter, readerScript: mReader });
+      }
+
       if (templateId === 'student_intelligence') {
         const sWriter = `async ({ db }) => {
   db.run("DROP TABLE IF EXISTS students;");
@@ -601,7 +658,7 @@ Teams with the lowest average Fixture Difficulty Rating (FDR).
                 ...table.values.map(row => `| ${row.map(cell => String(cell)).join(' | ')} |`)
               ].join('\n');
             }
-          };
+          } as any;
         }
       });
       return template(context);
@@ -649,7 +706,6 @@ Teams with the lowest average Fixture Difficulty Rating (FDR).
     return getDiff(old, readerScript);
   }, [readerScript, history]);
 
-  const renderedMarkdown = useMemo(() => { try { return marked.parse(processedContent); } catch (e) { return processedContent; } }, [processedContent]);
 
   const handleExport = useCallback(() => {
     if (!processedContent.trim()) return;
@@ -875,23 +931,56 @@ Teams with the lowest average Fixture Difficulty Rating (FDR).
                   <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">thinkNotes</h1>
                   <p className="text-xs sm:text-sm text-theme-muted leading-relaxed">A powerful markdown workspace where an intelligent assistant manages data, research, and document transformation via agentic pipelines.</p>
                 </div>
-                <div className="grid grid-cols-1 xs:grid-cols-2 gap-3 sm:gap-4 px-2">
-                  {TEMPLATES.filter(t => t.id !== 'blank').map(t => (
-                    <button key={t.id} onClick={() => applyTemplate(t.id)} className="p-3 sm:p-4 rounded-2xl border text-left hover:border-indigo-500/50 hover:bg-white/5 transition-all group" style={{ borderColor: 'var(--border-primary)' }}>
-                      <span className="text-xl sm:text-2xl mb-2 sm:mb-3 block group-hover:scale-110 transition-transform">{t.icon}</span>
-                      <p className="text-xs sm:text-sm font-bold text-white mb-0.5 sm:mb-1">{t.name}</p>
-                      <p className="text-[9px] sm:text-[10px] text-theme-muted">{t.description}</p>
-                    </button>
-                  ))}
+
+                {/* Highlights Section */}
+                <div className="grid grid-cols-2 gap-3 sm:gap-4 px-2">
+                  <div className="p-3 rounded-xl border bg-white/5 flex flex-col gap-2" style={{ borderColor: 'var(--border-primary)' }}>
+                    <div className="flex items-center gap-2 text-emerald-400">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1M7 10l5 5m0 0l5-5m-5 5V3" /></svg>
+                      <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider">External API</span>
+                    </div>
+                    <p className="text-[10px] text-theme-muted leading-snug">Connect & fetch live data sources instantly.</p>
+                  </div>
+                  <div className="p-3 rounded-xl border bg-white/5 flex flex-col gap-2" style={{ borderColor: 'var(--border-primary)' }}>
+                    <div className="flex items-center gap-2 text-indigo-400">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
+                      <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider">Dashboards</span>
+                    </div>
+                    <p className="text-[10px] text-theme-muted leading-snug">Create instant simple dashboards & metrics.</p>
+                  </div>
+                  <div className="p-3 rounded-xl border bg-white/5 flex flex-col gap-2" style={{ borderColor: 'var(--border-primary)' }}>
+                    <div className="flex items-center gap-2 text-amber-400">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z" /></svg>
+                      <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider">Articles</span>
+                    </div>
+                    <p className="text-[10px] text-theme-muted leading-snug">Rich markdown with math (LaTeX) & code.</p>
+                  </div>
+                  <div className="p-3 rounded-xl border bg-white/5 flex flex-col gap-2" style={{ borderColor: 'var(--border-primary)' }}>
+                    <div className="flex items-center gap-2 text-fuchsia-400">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                      <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider">Canvas</span>
+                    </div>
+                    <p className="text-[10px] text-theme-muted leading-snug">Flexible workspace for ideas & creativity.</p>
+                  </div>
                 </div>
-                <button onClick={() => applyTemplate('blank')} className="text-[10px] sm:text-xs font-bold text-indigo-500 hover:text-indigo-400 underline underline-offset-4">Start with a blank note</button>
+                {/* Templates removed as per request */}
+                <div className="flex justify-center pt-2">
+                  <button onClick={() => applyTemplate('blank')} className="text-xs font-bold text-indigo-400 hover:text-indigo-300 transition-colors uppercase tracking-wider">Start with a blank note</button>
+                </div>
               </div>
             </div>
           ) : (
             <div className="flex-1 overflow-hidden relative">
               {viewMode === 'preview' && (
                 <div className="h-full overflow-y-auto p-4 xs:p-8 sm:p-12 max-w-4xl mx-auto">
-                  <div className="markdown-body animate-in fade-in slide-in-from-bottom-4 duration-500" dangerouslySetInnerHTML={{ __html: renderedMarkdown }} />
+                  <div className="markdown-body animate-in fade-in slide-in-from-bottom-4 duration-500">
+                    <ReactMarkdown
+                      remarkPlugins={[remarkMath, remarkGfm]}
+                      rehypePlugins={[rehypeKatex]}
+                    >
+                      {processedContent}
+                    </ReactMarkdown>
+                  </div>
                 </div>
               )}
               {viewMode === 'edit' && (

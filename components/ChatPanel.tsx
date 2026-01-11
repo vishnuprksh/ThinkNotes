@@ -18,7 +18,7 @@ interface ChatPanelProps {
   setWriterScript: (script: string) => void;
   readerScript: string;
   setReaderScript: (script: string) => void;
-  handleSync: (scripts?: { writer?: string; reader?: string }) => Promise<void>;
+  handleSync: (scripts?: { writer?: string; reader?: string }) => Promise<Record<string, string | TableData> | void>;
   recordGlobalState: (description: string, overrides?: Partial<GlobalState>) => number;
   onCloseMobile?: () => void;
 }

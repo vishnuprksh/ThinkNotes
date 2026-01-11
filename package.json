@@ -11,9 +11,14 @@
   "dependencies": {
     "@google/genai": "^1.34.0",
     "handlebars": "^4.7.8",
+    "katex": "^0.16.27",
     "marked": "^15.0.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
+    "react-markdown": "^10.1.0",
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
     "sql.js": "^1.13.0"
   },
   "devDependencies": {
