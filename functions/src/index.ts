@@ -65,7 +65,7 @@ export const getCopilotResponse = onRequest({
   - Explicitly mention in your natural language response that you are gathering real data from the API.
   - IMPORTANT: When calling external APIs, use PROXY PATHS to avoid CORS errors:
     * For FPL API (https://fantasy.premierleague.com/api/), use '/fpl/' prefix (e.g., '/fpl/bootstrap-static/' instead of 'https://fantasy.premierleague.com/api/bootstrap-static/')
-    * The frontend has a Vite proxy configured that routes '/fpl/*' requests to the FPL API
+    * The workspace is configured with a proxy that routes '/fpl/*' requests to the FPL API (works in both local dev and production)
     * Always use relative proxy paths (starting with '/') instead of absolute URLs when available
   
   CODE EXECUTION FOR API EXPLORATION:
@@ -234,5 +234,52 @@ Respond with JSON only:
   } catch (error) {
     logger.error("Error calling Gemini API:", error);
     res.status(500).send("Internal Server Error: " + (error instanceof Error ? error.message : String(error)));
+  }
+});
+
+export const proxyFpl = onRequest({
+  cors: true,
+  maxInstances: 10
+}, async (req: any, res: any) => {
+  // Extract the path after /fpl/
+  // req.path will be something like /bootstrap-static/ if the rewrite works correctly
+  // depending on how firebase hosting rewrites it.
+  // Actually, usually req.path in the function preserves the original path or the rewrited path.
+  // If mapped via hosting rewrite "/fpl/**" -> "proxyFpl", the req.path might be "/fpl/bootstrap-static/"
+
+  let targetPath = req.path;
+  if (targetPath.startsWith('/fpl')) {
+    targetPath = targetPath.replace('/fpl', '');
+  }
+  // Ensure leading slash
+  if (!targetPath.startsWith('/')) {
+    targetPath = '/' + targetPath;
+  }
+
+  const FPL_BASE_URL = "https://fantasy.premierleague.com/api";
+  const targetUrl = `${FPL_BASE_URL}${targetPath}`;
+
+  logger.info(`Proxying FPL request: ${req.path} -> ${targetUrl}`);
+
+  try {
+    const apiRes = await fetch(targetUrl, {
+      method: req.method,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json"
+      }
+    });
+
+    if (!apiRes.ok) {
+      logger.error(`FPL API Error ${apiRes.status}: ${apiRes.statusText}`);
+      res.status(apiRes.status).send(apiRes.statusText);
+      return;
+    }
+
+    const data = await apiRes.json();
+    res.json(data);
+  } catch (error) {
+    logger.error("FPL Proxy Failed:", error);
+    res.status(500).json({ error: "Failed to fetch from FPL API" });
   }
 });

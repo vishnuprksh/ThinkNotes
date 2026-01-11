@@ -25,6 +25,10 @@
                 "function": "getCopilotResponse"
             },
             {
+                "source": "/fpl/**",
+                "function": "proxyFpl"
+            },
+            {
                 "source": "**",
                 "destination": "/index.html"
             }
