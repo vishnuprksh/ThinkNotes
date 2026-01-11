@@ -10,6 +10,11 @@ marked.setOptions({
   breaks: true,
 });
 
+Handlebars.registerHelper('add', (a, b) => Number(a) + Number(b));
+Handlebars.registerHelper('sub', (a, b) => Number(a) - Number(b));
+Handlebars.registerHelper('mul', (a, b) => Number(a) * Number(b));
+Handlebars.registerHelper('div', (a, b) => Number(a) / Number(b));
+
 interface DiffLine { type: 'added' | 'removed' | 'unchanged'; content: string; }
 interface AppTheme { name: string; bgPrimary: string; bgSecondary: string; borderPrimary: string; accentPrimary: string; textPrimary: string; textSecondary: string; textHeaders: string; }
 
